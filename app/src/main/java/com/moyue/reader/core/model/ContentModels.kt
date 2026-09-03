@@ -46,6 +46,7 @@ data class ParsedBook(
     val sourceType: SourceType,
     val chapters: List<ParsedChapter>,
     val coverPath: String? = null,
+    val wordCount: Long = 0,
 )
 
 data class ParseInput(
