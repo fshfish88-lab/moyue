@@ -1,0 +1,108 @@
+package com.moyue.reader.parser.web
+
+import java.net.URI
+
+class NoReadableContentException(message: String = "未识别到可阅读正文") : Exception(message)
+
+data class ReadablePage(
+    val title: String,
+    val text: String,
+    val sourceUrl: String,
+    val previousUrl: String?,
+    val nextUrl: String?,
+    val removedItems: List<String>,
+)
+
+class ReadabilityExtractor {
+    fun extract(html: String, sourceUrl: String): ReadablePage {
+        val base = validateUrl(sourceUrl)
+        val removed = mutableListOf<String>()
+        var cleaned = html
+        val structuralNoise = listOf("script", "style", "noscript", "nav", "header", "footer", "form", "aside", "iframe")
+        structuralNoise.forEach { tag ->
+            val regex = Regex("(?is)<$tag\\b[^>]*>.*?</$tag>")
+            if (regex.containsMatchIn(cleaned)) removed += tag
+            cleaned = cleaned.replace(regex, "")
+        }
+        val keywordNoise = Regex(
+            "(?is)<(div|section|ul)\\b[^>]*(?:class|id)=[\"'][^\"']*(?:advert|ads?|comment|recommend|related|share|sidebar|toolbar|login)[^\"']*[\"'][^>]*>.*?</\\1>",
+        )
+        if (keywordNoise.containsMatchIn(cleaned)) removed += "广告/评论/推荐"
+        cleaned = cleaned.replace(keywordNoise, "")
+
+        val candidate = firstBody(cleaned, "article")
+            ?: firstBody(cleaned, "main")
+            ?: bestDenseBlock(cleaned)
+            ?: cleaned.substringAfter("<body", cleaned).substringAfter('>', cleaned).substringBeforeLast("</body>", cleaned)
+        val text = htmlToText(candidate)
+        if (text.count { !it.isWhitespace() } < 20) throw NoReadableContentException()
+        val title = heading(candidate).ifBlank {
+            documentTitle(html).substringBefore(" · ").substringBefore(" - ").ifBlank { "网页小说" }
+        }
+        return ReadablePage(
+            title = title,
+            text = text,
+            sourceUrl = base.toString(),
+            previousUrl = findChapterLink(html, base, previous = true),
+            nextUrl = findChapterLink(html, base, previous = false),
+            removedItems = removed.distinct(),
+        )
+    }
+
+    private fun firstBody(html: String, tag: String): String? =
+        Regex("(?is)<$tag\\b[^>]*>(.*?)</$tag>").find(html)?.groupValues?.get(1)
+
+    private fun bestDenseBlock(html: String): String? =
+        Regex("(?is)<(div|section)\\b[^>]*>(.*?)</\\1>").findAll(html)
+            .map { it.groupValues[2] }
+            .filter { htmlToText(it).length >= 20 }
+            .maxByOrNull { block ->
+                htmlToText(block).length - Regex("(?is)<a\\b[^>]*>.*?</a>").findAll(block).sumOf { htmlToText(it.value).length * 2 }
+            }
+
+    private fun heading(html: String): String =
+        Regex("(?is)<h[1-3]\\b[^>]*>(.*?)</h[1-3]>").find(html)?.groupValues?.get(1)
+            ?.let(::htmlToText).orEmpty().lineSequence().firstOrNull().orEmpty()
+
+    private fun documentTitle(html: String): String =
+        Regex("(?is)<title\\b[^>]*>(.*?)</title>").find(html)?.groupValues?.get(1)
+            ?.let(::htmlToText).orEmpty()
+
+    private fun findChapterLink(html: String, base: URI, previous: Boolean): String? {
+        val anchors = Regex("(?is)<a\\b([^>]*)>(.*?)</a>").findAll(html)
+        val words = if (previous) listOf("上一章", "上一页", "前一章", "prev") else listOf("下一章", "下一页", "后一章", "next")
+        anchors.forEach { match ->
+            val attributes = match.groupValues[1]
+            val label = htmlToText(match.groupValues[2]) + " " + attributes
+            if (words.any { label.contains(it, ignoreCase = true) }) {
+                val href = Regex("(?is)href\\s*=\\s*[\"']([^\"']+)[\"']").find(attributes)?.groupValues?.get(1)
+                    ?: return@forEach
+                val resolved = runCatching { base.resolve(href) }.getOrNull() ?: return@forEach
+                if (resolved.scheme.equals("http", true) || resolved.scheme.equals("https", true)) return resolved.toString()
+            }
+        }
+        return null
+    }
+
+    private fun validateUrl(value: String): URI {
+        val uri = runCatching { URI(value) }.getOrElse { throw IllegalArgumentException("网页地址无效") }
+        require(uri.scheme.equals("http", true) || uri.scheme.equals("https", true)) { "仅支持 HTTP/HTTPS 地址" }
+        require(!uri.host.isNullOrBlank()) { "网页地址缺少域名" }
+        return uri
+    }
+
+    private fun htmlToText(value: String): String = decodeEntities(
+        value
+            .replace(Regex("(?is)<br\\s*/?>|</p>|</div>|</li>|</h[1-6]>|</blockquote>"), "\n")
+            .replace(Regex("(?is)<[^>]+>"), ""),
+    ).lines().map(String::trim).filter(String::isNotEmpty).joinToString("\n\n")
+
+    private fun decodeEntities(text: String): String = text
+        .replace("&nbsp;", " ", true)
+        .replace("&amp;", "&", true)
+        .replace("&lt;", "<", true)
+        .replace("&gt;", ">", true)
+        .replace("&quot;", "\"", true)
+        .replace("&#39;", "'", true)
+        .replace(Regex("&#(\\d+);")) { match -> match.groupValues[1].toIntOrNull()?.toChar()?.toString() ?: match.value }
+}

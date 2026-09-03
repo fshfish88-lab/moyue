@@ -1,0 +1,80 @@
+package com.moyue.reader.parser.epub
+
+import org.w3c.dom.Document
+import org.w3c.dom.Element
+import java.io.File
+import javax.xml.parsers.DocumentBuilderFactory
+
+data class EpubSpineItem(
+    val id: String,
+    val href: String,
+    val mediaType: String,
+    val properties: String,
+)
+
+data class EpubPackage(
+    val title: String,
+    val author: String?,
+    val packageDirectory: File,
+    val spine: List<EpubSpineItem>,
+    val cover: EpubSpineItem?,
+)
+
+class EpubPackageParser {
+    fun parse(root: File): EpubPackage {
+        val container = parseXml(root.resolve("META-INF/container.xml"))
+        val rootfile = container.elements("rootfile").firstOrNull()
+            ?.getAttribute("full-path")?.takeIf(String::isNotBlank)
+            ?: error("EPUB 缺少 OPF 路径")
+        val opfFile = safeResolve(root, rootfile)
+        val document = parseXml(opfFile)
+        val manifest = document.elements("item").associate { element ->
+            val item = EpubSpineItem(
+                id = element.getAttribute("id"),
+                href = element.getAttribute("href").substringBefore('#'),
+                mediaType = element.getAttribute("media-type"),
+                properties = element.getAttribute("properties"),
+            )
+            item.id to item
+        }
+        val spine = document.elements("itemref").mapNotNull { manifest[it.getAttribute("idref")] }
+        require(spine.isNotEmpty()) { "EPUB 没有可阅读章节" }
+        val coverId = document.elements("meta")
+            .firstOrNull { it.getAttribute("name").equals("cover", true) }
+            ?.getAttribute("content")
+        return EpubPackage(
+            title = document.elements("title").firstOrNull()?.textContent?.trim().orEmpty().ifBlank { "未命名书籍" },
+            author = document.elements("creator").firstOrNull()?.textContent?.trim()?.takeIf(String::isNotBlank),
+            packageDirectory = requireNotNull(opfFile.parentFile),
+            spine = spine,
+            cover = manifest.values.firstOrNull { "cover-image" in it.properties.split(' ') }
+                ?: coverId?.let(manifest::get),
+        )
+    }
+
+    fun safeResolve(parent: File, relative: String): File {
+        val root = parent.canonicalFile
+        val file = File(root, relative.replace("%20", " ")).canonicalFile
+        require(file == root || file.path.startsWith(root.path + File.separator)) { "EPUB 引用了不安全路径" }
+        return file
+    }
+
+    private fun parseXml(file: File): Document {
+        require(file.isFile) { "EPUB 缺少 ${file.name}" }
+        val factory = DocumentBuilderFactory.newInstance().apply {
+            isNamespaceAware = true
+            setFeature("http://apache.org/xml/features/disallow-doctype-decl", true)
+            setFeature("http://xml.org/sax/features/external-general-entities", false)
+            setFeature("http://xml.org/sax/features/external-parameter-entities", false)
+            isXIncludeAware = false
+            isExpandEntityReferences = false
+        }
+        return file.inputStream().use { factory.newDocumentBuilder().parse(it) }
+    }
+
+    private fun Document.elements(localName: String): List<Element> {
+        val namespaced = getElementsByTagNameNS("*", localName)
+        val nodes = if (namespaced.length > 0) namespaced else getElementsByTagName(localName)
+        return (0 until nodes.length).mapNotNull { nodes.item(it) as? Element }
+    }
+}

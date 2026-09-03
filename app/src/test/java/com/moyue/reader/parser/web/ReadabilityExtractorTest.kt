@@ -1,0 +1,36 @@
+package com.moyue.reader.parser.web
+
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+class ReadabilityExtractorTest {
+    @Test
+    fun extractsArticleAndRemovesNavigationAdsCommentsAndScripts() {
+        val html = """
+            <html><head><title>风雪夜 · 第一章</title><script>steal()</script></head><body>
+            <nav>首页 排行 登录</nav><div class="advert">立即充值</div>
+            <article><h1>第一章 风起</h1><p>夜色渐深，远处的灯一点点亮起。</p><p>这是连续的第二段正文，足够用于识别。</p></article>
+            <div class="comments">评论区 推荐小说</div>
+            <a rel="next" href="/novel/2">下一章</a>
+            </body></html>
+        """.trimIndent()
+
+        val result = ReadabilityExtractor().extract(html, "https://example.com/novel/1")
+
+        assertEquals("第一章 风起", result.title)
+        assertTrue(result.text.contains("夜色渐深"))
+        assertFalse(result.text.contains("立即充值"))
+        assertFalse(result.text.contains("评论区"))
+        assertFalse(result.text.contains("steal"))
+        assertEquals("https://example.com/novel/2", result.nextUrl)
+    }
+
+    @Test
+    fun rejectsPageWithoutReadableBody() {
+        val html = "<html><body><nav><a href='/'>首页</a></nav></body></html>"
+        val result = runCatching { ReadabilityExtractor().extract(html, "https://example.com") }
+        assertTrue(result.exceptionOrNull() is NoReadableContentException)
+    }
+}

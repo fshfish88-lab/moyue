@@ -147,6 +147,7 @@ class RoomAtomicImportStore(
 ) : AtomicImportStore {
     override suspend fun commit(prepared: PreparedImport): Long {
         var publishedDirectory: File? = null
+        var publishedCache: File? = null
         try {
             return database.withTransaction {
                 val bookDao = database.bookDao()
@@ -167,15 +168,36 @@ class RoomAtomicImportStore(
                 )
                 val bookId = bookDao.insert(draft)
                 val destination = storage.bookDirectory(bookId)
-                publishDirectory(prepared.stagedDirectory, destination)
+                if (!destination.mkdirs()) throw IOException("无法创建书籍目录")
                 publishedDirectory = destination
-
                 val finalSource = storage.sourceFile(bookId, prepared.sourceExtension)
+                move(prepared.stagedSource, finalSource)
+                val finalCover = prepared.book.coverPath?.let { sourcePath ->
+                    val sourceCover = File(sourcePath)
+                    if (sourceCover.isFile) {
+                        val extension = sourceCover.extension.takeIf(String::isNotBlank) ?: "img"
+                        destination.resolve("cover.$extension").also { sourceCover.copyTo(it, overwrite = true) }.absolutePath
+                    } else null
+                }
+                val stagedDerived = prepared.stagedDirectory.resolve(
+                    "derived/${prepared.book.sourceType.name.lowercase()}",
+                )
+                val finalCache = when (prepared.book.sourceType) {
+                    SourceType.TXT -> null
+                    SourceType.EPUB -> storage.epubCache(bookId)
+                    SourceType.WEB -> storage.webCache(bookId)
+                }
+                if (finalCache != null && stagedDerived.exists()) {
+                    finalCache.parentFile?.mkdirs()
+                    if (finalCache.exists()) finalCache.deleteRecursively()
+                    move(stagedDerived, finalCache)
+                    publishedCache = finalCache
+                }
                 bookDao.update(
                     draft.copy(
                         id = bookId,
                         sourcePath = finalSource.absolutePath,
-                        coverPath = relocate(prepared.book.coverPath, prepared.stagedDirectory, destination),
+                        coverPath = finalCover,
                     ),
                 )
                 chapterDao.insertAll(
@@ -186,7 +208,13 @@ class RoomAtomicImportStore(
                             chapterIndex = chapter.index,
                             startByte = chapter.startByte,
                             endByte = chapter.endByte,
-                            cachePath = relocate(chapter.cachePath, prepared.stagedDirectory, destination),
+                            cachePath = relocate(
+                                path = chapter.cachePath,
+                                stagedDerived = stagedDerived,
+                                finalCache = finalCache,
+                                stagedDirectory = prepared.stagedDirectory,
+                                finalDirectory = destination,
+                            ),
                             sourceUrl = chapter.sourceUrl,
                             previousUrl = chapter.previousUrl,
                             nextUrl = chapter.nextUrl,
@@ -197,12 +225,12 @@ class RoomAtomicImportStore(
             }
         } catch (error: Exception) {
             publishedDirectory?.deleteRecursively()
+            publishedCache?.deleteRecursively()
             throw error
         }
     }
 
-    private fun publishDirectory(source: File, destination: File) {
-        if (destination.exists()) throw IOException("目标书籍目录已存在")
+    private fun move(source: File, destination: File) {
         destination.parentFile?.mkdirs()
         try {
             Files.move(source.toPath(), destination.toPath(), StandardCopyOption.ATOMIC_MOVE)
@@ -211,14 +239,26 @@ class RoomAtomicImportStore(
         }
     }
 
-    private fun relocate(path: String?, from: File, to: File): String? {
+    private fun relocate(
+        path: String?,
+        stagedDerived: File,
+        finalCache: File?,
+        stagedDirectory: File,
+        finalDirectory: File,
+    ): String? {
         if (path == null) return null
         val candidate = File(path)
         if (!candidate.isAbsolute) return path
-        return if (candidate.toPath().startsWith(from.toPath())) {
-            to.toPath().resolve(from.toPath().relativize(candidate.toPath())).toFile().absolutePath
-        } else {
-            path
+        if (finalCache != null && candidate.toPath().startsWith(stagedDerived.toPath())) {
+            return finalCache.toPath()
+                .resolve(stagedDerived.toPath().relativize(candidate.toPath()))
+                .toFile().absolutePath
         }
+        if (candidate.toPath().startsWith(stagedDirectory.toPath())) {
+            return finalDirectory.toPath()
+                .resolve(stagedDirectory.toPath().relativize(candidate.toPath()))
+                .toFile().absolutePath
+        }
+        return path
     }
 }
