@@ -156,6 +156,7 @@ class RoomAtomicImportStore(
                     author = prepared.book.author,
                     sourceType = prepared.book.sourceType,
                     sourcePath = "",
+                    textEncoding = prepared.book.textEncoding,
                     sourceUrl = prepared.sourceUrl,
                     coverPath = prepared.book.coverPath,
                     chapterCount = prepared.book.chapters.size,

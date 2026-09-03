@@ -13,6 +13,7 @@ data class BookEntity(
     val author: String?,
     val sourceType: SourceType,
     val sourcePath: String,
+    val textEncoding: String?,
     val sourceUrl: String?,
     val coverPath: String?,
     val chapterCount: Int,

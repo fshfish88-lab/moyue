@@ -2,11 +2,11 @@
   "formatVersion": 1,
   "database": {
     "version": 1,
-    "identityHash": "ec4a135bf856137662d41d0f6e1eb098",
+    "identityHash": "6ca0c4a9c169b13e3c4cb969235b6b4c",
     "entities": [
       {
         "tableName": "books",
-        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `title` TEXT NOT NULL, `author` TEXT, `sourceType` TEXT NOT NULL, `sourcePath` TEXT NOT NULL, `sourceUrl` TEXT, `coverPath` TEXT, `chapterCount` INTEGER NOT NULL, `wordCount` INTEGER NOT NULL, `createdAt` INTEGER NOT NULL, `lastReadAt` INTEGER, `progress` REAL NOT NULL)",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `title` TEXT NOT NULL, `author` TEXT, `sourceType` TEXT NOT NULL, `sourcePath` TEXT NOT NULL, `textEncoding` TEXT, `sourceUrl` TEXT, `coverPath` TEXT, `chapterCount` INTEGER NOT NULL, `wordCount` INTEGER NOT NULL, `createdAt` INTEGER NOT NULL, `lastReadAt` INTEGER, `progress` REAL NOT NULL)",
         "fields": [
           {
             "fieldPath": "id",
@@ -36,6 +36,11 @@
             "columnName": "sourcePath",
             "affinity": "TEXT",
             "notNull": true
+          },
+          {
+            "fieldPath": "textEncoding",
+            "columnName": "textEncoding",
+            "affinity": "TEXT"
           },
           {
             "fieldPath": "sourceUrl",
@@ -265,7 +270,7 @@
     ],
     "setupQueries": [
       "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
-      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, 'ec4a135bf856137662d41d0f6e1eb098')"
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '6ca0c4a9c169b13e3c4cb969235b6b4c')"
     ]
   }
 }
