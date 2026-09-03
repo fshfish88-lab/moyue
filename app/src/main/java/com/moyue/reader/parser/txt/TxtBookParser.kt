@@ -21,7 +21,16 @@ class TxtBookParser(
 ) : BookParser {
     override suspend fun parse(input: ParseInput): ParsedBook = withContext(Dispatchers.IO) {
         require(input.sourceType == SourceType.TXT) { "TxtBookParser only accepts TXT" }
-        val sample = input.source.inputStream().buffered().use { it.readNBytes(256 * 1024) }
+        val sample = input.source.inputStream().buffered().use { stream ->
+            val buffer = ByteArray(256 * 1024)
+            var total = 0
+            while (total < buffer.size) {
+                val read = stream.read(buffer, total, buffer.size - total)
+                if (read < 0) break
+                total += read
+            }
+            buffer.copyOf(total)
+        }
         val encoding = detector.detect(sample)
         val chapters = input.source.inputStream().use { scanner.scan(it, encoding.charset) }
         ParsedBook(

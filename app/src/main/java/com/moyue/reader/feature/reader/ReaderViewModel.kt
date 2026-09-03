@@ -49,13 +49,25 @@ class ReaderViewModel(private val repository: ReaderRepository) : ViewModel() {
             controlsVisible = false,
             preferences = ReaderPreferences(),
             canGoPrevious = session.chapter.index > 0,
-            canGoNext = session.chapter.index < session.chapters.lastIndex,
+            canGoNext = session.chapter.index < session.chapters.lastIndex ||
+                !session.chapters[session.chapter.index].nextUrl.isNullOrBlank(),
         )
     }
 
     suspend fun goNext() {
-        val index = mutableState.value?.chapter?.index ?: return
-        moveTo(index + 1)
+        val current = mutableState.value ?: return
+        save(current)
+        val chapter = repository.next(current.chapter.index) ?: return
+        val chapters = repository.chaptersSnapshot()
+        mutableState.value = current.copy(
+            chapter = chapter,
+            chapters = chapters,
+            position = ReaderPosition(0, 0),
+            chapterProgress = 0f,
+            bookProgress = chapterBookProgress(chapter.index, 0f, chapters.size),
+            canGoPrevious = true,
+            canGoNext = chapter.index < chapters.lastIndex || !chapters[chapter.index].nextUrl.isNullOrBlank(),
+        )
     }
 
     suspend fun goPrevious() {
@@ -104,7 +116,7 @@ class ReaderViewModel(private val repository: ReaderRepository) : ViewModel() {
             chapterProgress = 0f,
             bookProgress = chapterBookProgress(index, 0f, current.chapters.size),
             canGoPrevious = index > 0,
-            canGoNext = index < current.chapters.lastIndex,
+            canGoNext = index < current.chapters.lastIndex || !current.chapters[index].nextUrl.isNullOrBlank(),
         )
     }
 

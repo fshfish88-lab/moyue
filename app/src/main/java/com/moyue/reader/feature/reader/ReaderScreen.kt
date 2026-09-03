@@ -23,9 +23,9 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
-import androidx.compose.material.icons.filled.KeyboardArrowLeft
-import androidx.compose.material.icons.filled.KeyboardArrowRight
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Settings
@@ -103,7 +103,7 @@ fun ReaderScreen(
                     title = { Text(state.bookTitle, style = MaterialTheme.typography.titleMedium) },
                     navigationIcon = {
                         IconButton(onClick = onBack) {
-                            Icon(Icons.Default.ArrowBack, contentDescription = "返回书架")
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回书架")
                         }
                     },
                     actions = {
@@ -266,13 +266,13 @@ private fun ReaderControls(
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {
                 TextButton(onClick = onPrevious, enabled = state.canGoPrevious) {
-                    Icon(Icons.Default.KeyboardArrowLeft, null)
+                    Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, null)
                     Text("上一章")
                 }
                 Text(state.chapter.title, style = MaterialTheme.typography.labelMedium)
                 TextButton(onClick = onNext, enabled = state.canGoNext) {
                     Text("下一章")
-                    Icon(Icons.Default.KeyboardArrowRight, null)
+                    Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null)
                 }
             }
             BottomAppBar {

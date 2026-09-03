@@ -42,6 +42,10 @@ fun interface AtomicImportStore {
     suspend fun commit(prepared: PreparedImport): Long
 }
 
+fun interface CoverFileGenerator {
+    fun generate(title: String, destination: File): File
+}
+
 class RecoverableImportException(message: String, cause: Throwable? = null) :
     Exception(message, cause)
 
@@ -143,6 +147,7 @@ class AtomicImportCoordinator(
 class RoomAtomicImportStore(
     private val database: MoyueDatabase,
     private val storage: BookStorage,
+    private val coverGenerator: CoverFileGenerator? = null,
     private val now: () -> Long = System::currentTimeMillis,
 ) : AtomicImportStore {
     override suspend fun commit(prepared: PreparedImport): Long {
@@ -172,13 +177,15 @@ class RoomAtomicImportStore(
                 publishedDirectory = destination
                 val finalSource = storage.sourceFile(bookId, prepared.sourceExtension)
                 move(prepared.stagedSource, finalSource)
-                val finalCover = prepared.book.coverPath?.let { sourcePath ->
+                val importedCover = prepared.book.coverPath?.let { sourcePath ->
                     val sourceCover = File(sourcePath)
                     if (sourceCover.isFile) {
                         val extension = sourceCover.extension.takeIf(String::isNotBlank) ?: "img"
                         destination.resolve("cover.$extension").also { sourceCover.copyTo(it, overwrite = true) }.absolutePath
                     } else null
                 }
+                val finalCover = importedCover ?: coverGenerator
+                    ?.generate(prepared.book.title, storage.coverFile(bookId))?.absolutePath
                 val stagedDerived = prepared.stagedDirectory.resolve(
                     "derived/${prepared.book.sourceType.name.lowercase()}",
                 )

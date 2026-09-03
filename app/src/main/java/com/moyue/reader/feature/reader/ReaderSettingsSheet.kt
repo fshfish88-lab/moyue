@@ -18,6 +18,7 @@ import com.moyue.reader.core.settings.PageMode
 import com.moyue.reader.core.settings.ReaderFont
 import com.moyue.reader.core.settings.ReaderPreferences
 import com.moyue.reader.core.settings.ReaderTheme
+import com.moyue.reader.core.settings.SpacingLevel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -59,6 +60,9 @@ fun ReaderSettingsSheet(
                     )
                 }
             }
+            SpacingSelector("行距", preferences.lineSpacing) { onChange(preferences.copy(lineSpacing = it)) }
+            SpacingSelector("段距", preferences.paragraphSpacing) { onChange(preferences.copy(paragraphSpacing = it)) }
+            SpacingSelector("边距", preferences.margin) { onChange(preferences.copy(margin = it)) }
             SettingLabel("翻页方式")
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 PageMode.entries.forEach { mode ->
@@ -69,18 +73,35 @@ fun ReaderSettingsSheet(
                     )
                 }
             }
-            Text(
-                "行距、段距与边距可在“设置”中选择紧凑、标准或宽松。",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(bottom = 20.dp),
-            )
+            Text("修改会立即预览并自动保存。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(bottom = 20.dp))
         }
     }
 }
 
 @Composable private fun SettingLabel(text: String) {
     Text(text, style = MaterialTheme.typography.labelLarge)
+}
+
+@Composable
+private fun SpacingSelector(label: String, value: SpacingLevel, onChange: (SpacingLevel) -> Unit) {
+    Column {
+        SettingLabel(label)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            SpacingLevel.entries.forEach { level ->
+                FilterChip(
+                    selected = value == level,
+                    onClick = { onChange(level) },
+                    label = { Text(level.label) },
+                )
+            }
+        }
+    }
+}
+
+private val SpacingLevel.label get() = when (this) {
+    SpacingLevel.COMPACT -> "紧凑"
+    SpacingLevel.STANDARD -> "标准"
+    SpacingLevel.WIDE -> "宽松"
 }
 
 private val ReaderTheme.label: String get() = when (this) {
