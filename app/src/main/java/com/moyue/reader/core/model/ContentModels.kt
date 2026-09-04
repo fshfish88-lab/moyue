@@ -54,4 +54,5 @@ data class ParseInput(
     val source: File,
     val sourceType: SourceType,
     val sourceUrl: String? = null,
+    val displayName: String? = null,
 )

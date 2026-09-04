@@ -2,6 +2,8 @@ package com.moyue.reader.parser.txt
 
 import com.moyue.reader.core.database.ChapterEntity
 import com.moyue.reader.core.model.ContentBlock
+import com.moyue.reader.core.model.ParseInput
+import com.moyue.reader.core.model.SourceType
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
@@ -73,5 +75,21 @@ class TxtChapterScannerTest {
         assertEquals(9, loaded.id)
         assertEquals(2, loaded.blocks.size)
         assertTrue(loaded.blocks.all { it is ContentBlock.Text })
+    }
+
+    @Test
+    fun parserUsesOriginalDisplayNameAfterSourceIsStaged() = runBlocking {
+        val stagedSource = temporaryFolder.newFile("source.txt")
+        stagedSource.writeText("第一章 开始\n正文。", Charsets.UTF_8)
+
+        val parsed = TxtBookParser().parse(
+            ParseInput(
+                source = stagedSource,
+                sourceType = SourceType.TXT,
+                displayName = "墨阅测试小说.txt",
+            ),
+        )
+
+        assertEquals("墨阅测试小说", parsed.title)
     }
 }

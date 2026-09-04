@@ -34,7 +34,11 @@ class TxtBookParser(
         val encoding = detector.detect(sample)
         val chapters = input.source.inputStream().use { scanner.scan(it, encoding.charset) }
         ParsedBook(
-            title = input.source.nameWithoutExtension.ifBlank { "未命名书籍" },
+            title = input.displayName
+                ?.substringBeforeLast('.', input.displayName)
+                ?.trim()
+                ?.takeIf(String::isNotBlank)
+                ?: input.source.nameWithoutExtension.ifBlank { "未命名书籍" },
             author = null,
             sourceType = SourceType.TXT,
             chapters = chapters.mapIndexed { index, chapter ->

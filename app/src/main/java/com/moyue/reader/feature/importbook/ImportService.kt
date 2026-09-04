@@ -49,7 +49,7 @@ class ImportService(
             input.use { source -> incoming.outputStream().buffered().use(source::copyTo) }
             coordinator.import(
                 ImportRequest(taskId, incoming, type, extension),
-                ParserProcessor(parserFor(type), type),
+                ParserProcessor(parserFor(type), type, displayName = displayName),
                 onProgress,
             )
         } finally {
@@ -92,11 +92,12 @@ private class ParserProcessor(
     private val parser: BookParser,
     private val sourceType: SourceType,
     private val sourceUrl: String? = null,
+    private val displayName: String? = null,
 ) : ImportProcessor {
     override suspend fun detect(source: File) = Unit
 
     override suspend fun parse(source: File, sourceType: SourceType): ParsedBook = try {
-        parser.parse(ParseInput(source, this.sourceType, sourceUrl))
+        parser.parse(ParseInput(source, this.sourceType, sourceUrl, displayName))
     } catch (error: NoReadableContentException) {
         throw RecoverableImportException(error.message ?: "未识别到正文", error)
     }
