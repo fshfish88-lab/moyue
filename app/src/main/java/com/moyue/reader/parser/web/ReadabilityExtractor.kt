@@ -50,15 +50,33 @@ class ReadabilityExtractor {
     }
 
     private fun firstBody(html: String, tag: String): String? =
-        Regex("(?is)<$tag\\b[^>]*>(.*?)</$tag>").find(html)?.groupValues?.get(1)
+        balancedBodies(html, tag).firstOrNull()
 
     private fun bestDenseBlock(html: String): String? =
-        Regex("(?is)<(div|section)\\b[^>]*>(.*?)</\\1>").findAll(html)
-            .map { it.groupValues[2] }
+        sequenceOf("div", "section")
+            .flatMap { balancedBodies(html, it).asSequence() }
             .filter { htmlToText(it).length >= 20 }
             .maxByOrNull { block ->
                 htmlToText(block).length - Regex("(?is)<a\\b[^>]*>.*?</a>").findAll(block).sumOf { htmlToText(it.value).length * 2 }
             }
+
+    private fun balancedBodies(html: String, tag: String): List<String> {
+        data class OpenTag(val contentStart: Int)
+        data class Body(val start: Int, val content: String)
+
+        val tags = Regex("(?is)<(/?)$tag\\b[^>]*>")
+        val stack = ArrayDeque<OpenTag>()
+        val bodies = mutableListOf<Body>()
+        tags.findAll(html).forEach { match ->
+            if (match.groupValues[1].isEmpty()) {
+                stack.addLast(OpenTag(match.range.last + 1))
+            } else if (stack.isNotEmpty()) {
+                val open = stack.removeLast()
+                bodies += Body(open.contentStart, html.substring(open.contentStart, match.range.first))
+            }
+        }
+        return bodies.sortedBy(Body::start).map(Body::content)
+    }
 
     private fun heading(html: String): String =
         Regex("(?is)<h[1-3]\\b[^>]*>(.*?)</h[1-3]>").find(html)?.groupValues?.get(1)

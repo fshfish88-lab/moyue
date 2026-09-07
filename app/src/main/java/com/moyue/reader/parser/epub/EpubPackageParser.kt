@@ -2,7 +2,9 @@ package com.moyue.reader.parser.epub
 
 import org.w3c.dom.Document
 import org.w3c.dom.Element
+import org.xml.sax.InputSource
 import java.io.File
+import java.io.StringReader
 import javax.xml.parsers.DocumentBuilderFactory
 
 data class EpubSpineItem(
@@ -20,7 +22,9 @@ data class EpubPackage(
     val cover: EpubSpineItem?,
 )
 
-class EpubPackageParser {
+class EpubPackageParser(
+    private val factoryProvider: () -> DocumentBuilderFactory = DocumentBuilderFactory::newInstance,
+) {
     fun parse(root: File): EpubPackage {
         val container = parseXml(root.resolve("META-INF/container.xml"))
         val rootfile = container.elements("rootfile").firstOrNull()
@@ -61,15 +65,24 @@ class EpubPackageParser {
 
     private fun parseXml(file: File): Document {
         require(file.isFile) { "EPUB 缺少 ${file.name}" }
-        val factory = DocumentBuilderFactory.newInstance().apply {
+        val factory = factoryProvider().apply {
             isNamespaceAware = true
-            setFeature("http://apache.org/xml/features/disallow-doctype-decl", true)
-            setFeature("http://xml.org/sax/features/external-general-entities", false)
-            setFeature("http://xml.org/sax/features/external-parameter-entities", false)
-            isXIncludeAware = false
-            isExpandEntityReferences = false
+            trySetFeature("http://xml.org/sax/features/external-general-entities", false)
+            trySetFeature("http://xml.org/sax/features/external-parameter-entities", false)
+            trySetFeature("http://apache.org/xml/features/nonvalidating/load-external-dtd", false)
+            runCatching { setAttribute("http://javax.xml.XMLConstants/property/accessExternalDTD", "") }
+            runCatching { setAttribute("http://javax.xml.XMLConstants/property/accessExternalSchema", "") }
+            runCatching { isXIncludeAware = false }
+            runCatching { isExpandEntityReferences = false }
         }
-        return file.inputStream().use { factory.newDocumentBuilder().parse(it) }
+        val builder = factory.newDocumentBuilder().apply {
+            setEntityResolver { _, _ -> InputSource(StringReader("")) }
+        }
+        return file.inputStream().use(builder::parse)
+    }
+
+    private fun DocumentBuilderFactory.trySetFeature(name: String, value: Boolean) {
+        runCatching { setFeature(name, value) }
     }
 
     private fun Document.elements(localName: String): List<Element> {

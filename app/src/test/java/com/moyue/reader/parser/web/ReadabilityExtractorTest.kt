@@ -33,4 +33,23 @@ class ReadabilityExtractorTest {
         val result = runCatching { ReadabilityExtractor().extract(html, "https://example.com") }
         assertTrue(result.exceptionOrNull() is NoReadableContentException)
     }
+
+    @Test
+    fun keepsTextAfterNestedDivInDenseContentContainer() {
+        val html = """
+            <html><head><title>第三章</title></head><body>
+            <div class="chapter-content">
+              <p>开头正文足够长，用来模拟没有 article 标签的小说站点。</p>
+              <div class="paragraph-group"><p>中间正文位于嵌套容器中。</p></div>
+              <p>末尾正文必须保留，不能在内层 div 闭合处提前截断。</p>
+            </div>
+            </body></html>
+        """.trimIndent()
+
+        val result = ReadabilityExtractor().extract(html, "https://example.com/book/3")
+
+        assertTrue(result.text.contains("开头正文"))
+        assertTrue(result.text.contains("中间正文"))
+        assertTrue(result.text.contains("末尾正文必须保留"))
+    }
 }

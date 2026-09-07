@@ -5,6 +5,7 @@ import com.moyue.reader.core.model.SourceType
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
+import org.junit.Assume.assumeTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
@@ -27,6 +28,24 @@ class EpubBookParserTest {
         assertEquals(listOf("开端", "归途"), parsed.chapters.map { it.title })
         assertTrue(parsed.chapters.all { File(requireNotNull(it.cachePath)).exists() })
         assertTrue(File(parsed.chapters[0].cachePath!!).readText().contains("第一段正文"))
+    }
+
+    @Test
+    fun parsesConfiguredRealWorldSample() = runBlocking {
+        val configured = System.getenv("MOYUE_EPUB_SAMPLE").orEmpty()
+        assumeTrue("Set MOYUE_EPUB_SAMPLE to run the real-world EPUB test", configured.isNotBlank())
+        val source = File(configured)
+        assumeTrue("Configured EPUB sample does not exist", source.isFile)
+        val epub = temporaryFolder.newFile("real-world.epub")
+        source.copyTo(epub, overwrite = true)
+
+        val parsed = EpubBookParser().parse(ParseInput(epub, SourceType.EPUB))
+
+        assertTrue(parsed.title.isNotBlank())
+        assertTrue(parsed.chapters.isNotEmpty())
+        assertTrue(parsed.chapters.all { File(requireNotNull(it.cachePath)).isFile })
+        assertTrue(parsed.wordCount > 0)
+        println("REAL_EPUB_RESULT title=${parsed.title} author=${parsed.author} chapters=${parsed.chapters.size} words=${parsed.wordCount}")
     }
 
     private fun makeEpub(): File {

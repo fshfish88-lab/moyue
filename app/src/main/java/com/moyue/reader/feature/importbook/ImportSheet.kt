@@ -5,8 +5,11 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -73,7 +76,19 @@ fun ImportSheet(
             preview?.let {
                 Text("解析结果", style = MaterialTheme.typography.titleMedium)
                 Text(it.readable.title, fontWeight = FontWeight.Medium)
-                Text(it.readable.text.take(160) + if (it.readable.text.length > 160) "…" else "", style = MaterialTheme.typography.bodyMedium)
+                Text(
+                    "正文 ${it.readable.text.count { character -> !character.isWhitespace() }} 字",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Column(
+                    Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 240.dp)
+                        .verticalScroll(rememberScrollState()),
+                ) {
+                    Text(it.readable.text, style = MaterialTheme.typography.bodyMedium)
+                }
                 Text(
                     if (it.readable.removedItems.isEmpty()) "已提取纯正文" else "已移除：${it.readable.removedItems.joinToString("、")}",
                     style = MaterialTheme.typography.bodySmall,

@@ -100,6 +100,11 @@ private class ParserProcessor(
         parser.parse(ParseInput(source, this.sourceType, sourceUrl, displayName))
     } catch (error: NoReadableContentException) {
         throw RecoverableImportException(error.message ?: "未识别到正文", error)
+    } catch (error: Exception) {
+        if (this.sourceType == SourceType.EPUB) {
+            throw RecoverableImportException("EPUB 解析失败，请确认文件完整且未加密", error)
+        }
+        throw error
     }
 
     override suspend fun validate(book: ParsedBook) {
