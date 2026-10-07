@@ -28,7 +28,7 @@ class WebReaderSmokeInstrumentation:Instrumentation() {
         val list=mutableListOf<AccessibilityNodeInfo>()
         fun walk(n:AccessibilityNodeInfo){list+=n;for(i in 0 until n.childCount)n.getChild(i)?.let {walk(it)}}
         val root=uiAutomation.rootInActiveWindow ?: uiAutomation.windows.mapNotNull {it.root}.lastOrNull {it.packageName=="com.moyue.reader"}
-        root?.let {walk(it)};return list
+        root?.let {it.refresh();walk(it)};return list
     }
     private fun find(s:String)=nodes().lastOrNull {it.text?.toString()==s || it.contentDescription?.toString()==s}
     private fun waitFor(s:String):AccessibilityNodeInfo {repeat(100){find(s)?.let {return it};SystemClock.sleep(100)};error("Missing $s; "+nodes().mapNotNull {it.text ?: it.contentDescription})}
@@ -170,7 +170,10 @@ class WebReaderSmokeInstrumentation:Instrumentation() {
             verify(true,"downwardDragAtTopNeverDismissesCatalog")
             locate(45)
             repeat(6) {nodes().lastOrNull {it.isScrollable}?.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD);SystemClock.sleep(350)}
-            verify(nodes().mapNotNull {it.text?.toString()}.any {Regex("第([0-9]+)章 中文测试").find(it)?.groupValues?.get(1)?.toInt()?.let {n->n>50}==true},"scrollPastFiftyChaptersWithoutChangingGroups")
+            runCatching {uiAutomation.waitForIdle(250,3000)}
+            fun pastFifty()=nodes().mapNotNull {it.text?.toString()}.any {Regex("第([0-9]+)章 中文测试").find(it)?.groupValues?.get(1)?.toInt()?.let {n->n>50}==true}
+            repeat(30){if(!pastFifty())SystemClock.sleep(100)}
+            verify(pastFifty(),"scrollPastFiftyChaptersWithoutChangingGroups")
             waitFor("目录 · 共 1828 章")
             verify(true,"scrollingKeepsCatalogOpen")
             click("关闭目录");verify(find("目录 · 共 1828 章")==null,"explicitCloseWorks")
