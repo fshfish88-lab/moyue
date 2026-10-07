@@ -146,7 +146,10 @@ class ReaderViewModel(private val repository: ReaderRepository) : ViewModel() {
             require(index>=0) {"当前章节未找到，已保留阅读位置"}
             val current=mutableState.value ?: return
             val chapter=current.chapter.copy(index=index)
+            val storedId=storedChapterIndex?.let {before.chapters.getOrNull(it)?.id}
+            storedChapterIndex=storedId?.let {id->chapters.indexOfFirst {it.id==id}.takeIf {it>=0}}
             mutableState.value=current.copy(chapters=chapters,chapter=chapter,scrollWindow=listOf(chapter),scrollSession=current.scrollSession+1,
+                bookProgress=chapterBookProgress(index,current.chapterProgress,chapters.size),
                 canGoPrevious=index>0,canGoNext=index<chapters.lastIndex || !chapters[index].nextUrl.isNullOrBlank(),catalogMessage=message)
         } catch(error:CancellationException){throw error}
           catch(error:Exception){mutableState.value=mutableState.value?.copy(catalogMessage="目录刷新失败：${error.message}")}
