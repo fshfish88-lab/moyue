@@ -13,7 +13,7 @@ class BookStorage(
 
     fun sourceFile(bookId: Long, extension: String): File {
         val safeExtension = extension.lowercase().removePrefix(".")
-        require(safeExtension in setOf("txt", "epub", "html")) { "unsupported source extension" }
+        require(safeExtension in setOf("txt", "epub", "html", "md", "pdf", "jpg", "jpeg", "png", "webp", "cbz", "zip")) { "unsupported source extension" }
         return File(bookDirectory(bookId), "source.$safeExtension")
     }
 
@@ -27,6 +27,11 @@ class BookStorage(
     fun webCache(bookId: Long): File {
         require(bookId > 0) { "bookId must be positive" }
         return File(cacheDir, "books/$bookId/web")
+    }
+
+    fun visualCache(bookId: Long): File {
+        require(bookId > 0)
+        return File(cacheDir, "books/$bookId/visual")
     }
 
     fun importTemp(taskId: String): File {

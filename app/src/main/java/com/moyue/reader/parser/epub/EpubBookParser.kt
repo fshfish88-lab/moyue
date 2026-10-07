@@ -26,7 +26,7 @@ class EpubBookParser(
             val htmlFile = packageParser.safeResolve(pkg.packageDirectory, item.href)
             require(htmlFile.isFile) { "EPUB 章节缺失: ${item.href}" }
             val html = htmlFile.readText()
-            val title = HtmlTextNormalizer.title(html).ifBlank { "第 ${index + 1} 章" }
+            val title = pkg.chapterTitles[htmlFile.canonicalPath].orEmpty().ifBlank { HtmlTextNormalizer.title(html) }.ifBlank { "第 ${index + 1} 章" }
             val text = HtmlTextNormalizer.toPlainText(html)
             wordCount += text.count { !it.isWhitespace() }
             val output = normalized.resolve(index.toString().padStart(5, '0') + ".txt")
@@ -55,15 +55,15 @@ class EpubBookParser(
 
 internal object HtmlTextNormalizer {
     fun title(html: String): String {
-        val value = Regex("(?is)<title[^>]*>(.*?)</title>").find(html)?.groupValues?.get(1)
-            ?: Regex("(?is)<h[1-3][^>]*>(.*?)</h[1-3]>").find(html)?.groupValues?.get(1)
+        val value = Regex("(?is)<h[1-3][^>]*>(.*?)</h[1-3]>").find(html)?.groupValues?.get(1)
+            ?: Regex("(?is)<title[^>]*>(.*?)</title>").find(html)?.groupValues?.get(1)
             ?: ""
         return decodeEntities(value.replace(Regex("(?is)<[^>]+>"), " ")).trim()
     }
 
     fun toPlainText(html: String): String = decodeEntities(
         html
-            .replace(Regex("(?is)<(script|style|nav|aside)[^>]*>.*?</\\1>"), "")
+            .replace(Regex("(?is)<(head|script|style|nav|aside)[^>]*>.*?</\\1>"), "")
             .replace(Regex("(?is)<img[^>]*alt=[\"']([^\"']*)[\"'][^>]*>"), "\n[图片：\$1]\n")
             .replace(Regex("(?is)</?(p|div|section|article|h[1-6]|blockquote|li|br|hr)[^>]*>"), "\n")
             .replace(Regex("(?is)<[^>]+>"), ""),

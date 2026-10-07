@@ -6,6 +6,15 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ReadabilityExtractorTest {
+    @org.junit.Test fun chapterHeadingOutsideBodyWinsOverSiteTitle() {
+        val page = ReadabilityExtractor().extract("<title>第一章论坛里的鬼故事。_神秘复苏_修真小说_蚂蚁文学</title><h1>第一章论坛里的鬼故事。</h1><div>" + "这是小说正文。".repeat(30) + "</div>", "https://example.com/1")
+        org.junit.Assert.assertEquals("第一章论坛里的鬼故事。", page.title)
+    }
+    @org.junit.Test fun selfLinkIsNotNextChapter() {
+        val page = ReadabilityExtractor().extract("<article>" + "这是小说正文。".repeat(30) + "</article><a href='#'>下一章</a>", "https://example.com/1")
+        org.junit.Assert.assertNull(page.nextUrl)
+    }
+
     @Test
     fun extractsArticleAndRemovesNavigationAdsCommentsAndScripts() {
         val html = """

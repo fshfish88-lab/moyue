@@ -2,10 +2,12 @@ package com.moyue.reader.feature.importbook
 
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -13,22 +15,28 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 
 @Composable
-fun ImportProgressDialog(state: ImportState, onDismiss: () -> Unit) {
+fun ImportProgressDialog(state: ImportState, onDismiss: () -> Unit, onRead: () -> Unit) {
     when (state) {
         is ImportState.Running -> AlertDialog(
             onDismissRequest = {},
+            containerColor = MaterialTheme.colorScheme.surface,
             confirmButton = {},
             title = { Text("正在导入") },
             text = {
                 Column {
                     Text(state.stage.label)
-                    LinearProgressIndicator(progress = { state.progress }, modifier = Modifier.fillMaxWidth().padding(top = 16.dp))
+                    LinearProgressIndicator(
+                        progress = { state.progress },
+                        trackColor = MaterialTheme.colorScheme.outlineVariant,
+                        modifier = Modifier.fillMaxWidth().padding(top = 16.dp).height(3.dp),
+                    )
                 }
             },
         )
         is ImportState.Completed -> AlertDialog(
             onDismissRequest = onDismiss,
-            confirmButton = { Button(onClick = onDismiss) { Text("开始阅读") } },
+            containerColor = MaterialTheme.colorScheme.surface,
+            confirmButton = { Button(onClick = onRead) { Text("开始阅读") } },
             title = { Text("导入完成") },
             text = { Text("书籍已安全保存到书架。") },
         )
@@ -41,6 +49,7 @@ fun ImportProgressDialog(state: ImportState, onDismiss: () -> Unit) {
 @Composable private fun ErrorDialog(title: String, message: String, onDismiss: () -> Unit) {
     AlertDialog(
         onDismissRequest = onDismiss,
+        containerColor = MaterialTheme.colorScheme.surface,
         confirmButton = { TextButton(onClick = onDismiss) { Text("知道了") } },
         title = { Text(title) },
         text = { Text(message) },

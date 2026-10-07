@@ -1,0 +1,23 @@
+:root { --moyue-background:#f7f7f5; --toolbar-height:0px; }
+html,body,#viewerContainer { background:var(--moyue-background)!important; }
+.toolbar,#toolbarContainer,#secondaryToolbar,#editorModeButtons,#editorUndoBar,#viewsManagerAddFileButton,#viewsManagerAddFilePicker,#viewsManagerStatusActionButton,#viewsManagerStatusActionOptions,#viewsManagerStatusWaiting { display:none!important; }
+#viewerContainer { top:0!important; }
+#viewerContainer .page { margin:8px auto!important; border:0!important; }
+.moyue-invert #viewerContainer .canvasWrapper { filter:invert(1) hue-rotate(180deg); }
+.annotationLayer input,.annotationLayer textarea,.annotationLayer select { pointer-events:none; }
+#viewsManager,#sidebarContainer { max-width:75vw; }
+#viewsManager { inset-block-start:var(--moyue-chrome-top,8px)!important; height:calc(100% - var(--moyue-chrome-top,8px) - var(--moyue-chrome-bottom,8px))!important; --sidebar-max-width:75vw; z-index:30; }
+/* Native navigation opens over the page, preserving the document's fit scale and coordinates. */
+#outerContainer.viewsManagerOpen #viewerContainer:not(.pdfPresentationMode) { inset-inline-start:0!important; }
+#passwordDialog { max-width:85vw; }
+
+:root { --sidebar-transition-duration:200ms; --sidebar-transition-timing-function:cubic-bezier(.4,0,.2,1); }
+html,body,#viewerContainer { transition:background-color 200ms cubic-bezier(.4,0,.2,1); }
+.moyue-reduce-motion { --sidebar-transition-duration:0ms; }
+.moyue-reduce-motion :is(body,#viewerContainer) { transition:none; }
+@media (prefers-reduced-motion:reduce) { :root { --sidebar-transition-duration:0ms; } html,body,#viewerContainer { transition:none; } }
+
+.moyue-sidebar-backdrop { position:absolute; inset:0; z-index:29; border:0; padding:0; background:#00000014; cursor:pointer; }
+.moyue-sidebar-backdrop[hidden] { display:none!important; }
+#moyue-sidebar-close { margin-inline-start:auto; flex:0 0 32px; width:32px; height:32px; border:0; border-radius:8px; font-size:24px; line-height:1; color:var(--button-fg); background:transparent; cursor:pointer; }
+#moyue-sidebar-close:focus-visible { outline:2px solid currentColor; }

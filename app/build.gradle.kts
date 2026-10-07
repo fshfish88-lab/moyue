@@ -15,9 +15,10 @@ android {
         applicationId = "com.moyue.reader"
         minSdk = 26
         targetSdk = 36
-        versionCode = 2
-        versionName = "1.0.1"
-        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        versionCode = 19
+        // V1.5.2: continuous catalog, explicit close, refresh and compact paged top spacing.
+        versionName = "1.5.2"
+        testInstrumentationRunner = "com.moyue.reader.feature.pdf.PdfSmokeInstrumentation"
     }
 
     buildTypes {
@@ -50,7 +51,9 @@ ksp {
 }
 
 dependencies {
+    implementation("io.github.panpf.zoomimage:zoomimage-compose-coil3:1.4.0")
     implementation("androidx.core:core-ktx:1.17.0")
+    implementation("androidx.webkit:webkit:1.14.0")
     implementation("androidx.activity:activity-compose:1.13.0")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.10.0")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.10.0")

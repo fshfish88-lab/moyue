@@ -15,10 +15,11 @@ class WebContentFetcher(
     private val connectTimeoutMs: Int = 10_000,
     private val readTimeoutMs: Int = 15_000,
     private val maxBodyBytes: Int = 5 * 1024 * 1024,
+    private val openConnection:(String)->HttpURLConnection = {URL(it).openConnection() as HttpURLConnection},
 ) {
     suspend fun fetch(url: String): FetchedWebPage = withContext(Dispatchers.IO) {
         validate(url)
-        val connection = URL(url).openConnection() as HttpURLConnection
+        val connection = openConnection(url)
         connection.instanceFollowRedirects = true
         connection.connectTimeout = connectTimeoutMs
         connection.readTimeout = readTimeoutMs
@@ -43,10 +44,7 @@ class WebContentFetcher(
                 }
                 output.toByteArray()
             }
-            val charsetName = Regex("charset=([^; ]+)", RegexOption.IGNORE_CASE)
-                .find(type)?.groupValues?.get(1)?.trim('"', '\'')
-            val charset = runCatching { Charset.forName(charsetName ?: "UTF-8") }.getOrDefault(Charsets.UTF_8)
-            FetchedWebPage(finalUrl, bytes.toString(charset))
+            FetchedWebPage(finalUrl, WebHtmlDecoder.decode(bytes,type))
         } finally {
             connection.disconnect()
         }

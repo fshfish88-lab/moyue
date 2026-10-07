@@ -37,24 +37,51 @@ class ImportService(
         onProgress: (ImportState.Running) -> Unit = {},
     ): ImportState = withContext(Dispatchers.IO) {
         val extension = displayName?.substringAfterLast('.', "")?.lowercase()
-            ?.takeIf { it in setOf("txt", "epub") }
-            ?: return@withContext ImportState.FatalError("unknown", "请选择 TXT 或 EPUB 文件")
-        val type = if (extension == "txt") SourceType.TXT else SourceType.EPUB
+            ?.takeIf { it in setOf("txt", "epub", "md", "markdown", "pdf", "jpg", "jpeg", "png", "webp", "cbz", "zip") }
+            ?: return@withContext ImportState.FatalError("unknown", "请选择 TXT / EPUB / Markdown / PDF / 图片 / CBZ / 图片 ZIP 文件")
+        val type = when (extension) { "txt" -> SourceType.TXT; "epub" -> SourceType.EPUB; "md", "markdown" -> SourceType.MARKDOWN; else -> SourceType.DOCUMENT }
+        val storedExtension = if (type == SourceType.MARKDOWN) "md" else extension
         val taskId = UUID.randomUUID().toString()
         val incoming = context.cacheDir.resolve("incoming/$taskId.$extension")
         try {
             incoming.parentFile?.mkdirs()
             val input = context.contentResolver.openInputStream(uri)
                 ?: return@withContext ImportState.RecoverableError(taskId, "无法读取所选文件，请重新选择")
-            input.use { source -> incoming.outputStream().buffered().use(source::copyTo) }
+            input.use { source ->
+                incoming.outputStream().buffered().use { output ->
+                    val buffer = ByteArray(8192); var copied = 0L
+                    while (true) {
+                        val count = source.read(buffer); if (count < 0) break
+                        copied += count
+                        if (type == SourceType.MARKDOWN) require(copied <= com.moyue.reader.parser.markdown.MarkdownText.MAX_BYTES) { "Markdown 文件不能超过 5 MB" }
+                        if (type == SourceType.DOCUMENT) require(copied <= 200L * 1024 * 1024) { "文档或图片文件不能超过 200 MB" }
+                        output.write(buffer, 0, count)
+                    }
+                }
+            }
             coordinator.import(
-                ImportRequest(taskId, incoming, type, extension),
-                ParserProcessor(parserFor(type), type, displayName = displayName),
+                ImportRequest(taskId, incoming, type, storedExtension),
+                if(extension == "pdf") com.moyue.reader.feature.pdf.PdfImportProcessor(context, displayName)
+                else if(type == SourceType.DOCUMENT) com.moyue.reader.feature.image.VisualImportProcessor(displayName, extension in setOf("cbz", "zip"))
+                else ParserProcessor(parserFor(type), type, displayName = displayName),
                 onProgress,
             )
+        } catch (error: kotlinx.coroutines.CancellationException) { throw error
+        } catch (error: Exception) {
+            ImportState.RecoverableError(taskId, error.message ?: "文件导入失败")
         } finally {
             incoming.delete()
         }
+    }
+
+    suspend fun newMarkdown(): ImportState = withContext(Dispatchers.IO) {
+        val taskId = UUID.randomUUID().toString()
+        val incoming = context.cacheDir.resolve("incoming/$taskId.md")
+        try {
+            incoming.parentFile?.mkdirs(); incoming.writeText("")
+            coordinator.import(ImportRequest(taskId, incoming, SourceType.MARKDOWN, "md"),
+                ParserProcessor(com.moyue.reader.parser.markdown.MarkdownBookParser(), SourceType.MARKDOWN, displayName = "未命名.md"))
+        } finally { incoming.delete() }
     }
 
     suspend fun previewWeb(url: String): WebImportPreview {
@@ -85,6 +112,8 @@ class ImportService(
         SourceType.TXT -> TxtBookParser()
         SourceType.EPUB -> EpubBookParser()
         SourceType.WEB -> WebBookParser(extractor)
+        SourceType.MARKDOWN -> com.moyue.reader.parser.markdown.MarkdownBookParser()
+        SourceType.DOCUMENT -> error("页面文档使用独立导入处理器")
     }
 }
 

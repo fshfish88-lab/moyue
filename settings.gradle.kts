@@ -11,7 +11,7 @@ pluginManagement {
         }
     }
     repositories {
-        maven { url = uri("C:/Users/67588/AppData/Local/Temp/moyue-build-cache/maven") }
+        maven { url = uri("../../构建缓存/maven") }
         google()
         mavenCentral()
         gradlePluginPortal()
@@ -21,7 +21,7 @@ pluginManagement {
 dependencyResolutionManagement {
     repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
     repositories {
-        maven { url = uri("C:/Users/67588/AppData/Local/Temp/moyue-build-cache/maven") }
+        maven { url = uri("../../构建缓存/maven") }
         google()
         mavenCentral()
     }

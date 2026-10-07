@@ -13,6 +13,18 @@ private val Context.readerDataStore by preferencesDataStore(name = "reader_prefe
 
 class ReaderPreferencesRepository(private val context: Context) {
     private object Keys {
+        val comicMode = stringPreferencesKey("comic_mode")
+        val imageFit = stringPreferencesKey("image_fit")
+        val pdfMode = stringPreferencesKey("pdf_mode")
+        val pdfFit = stringPreferencesKey("pdf_fit")
+        val pdfInvert = booleanPreferencesKey("pdf_invert")
+        val customColors = booleanPreferencesKey("custom_colors")
+        val backgroundHex = stringPreferencesKey("background_hex")
+        val textHex = stringPreferencesKey("text_hex")
+        val indent = booleanPreferencesKey("indent")
+        val autoNext = booleanPreferencesKey("auto_next")
+        val keepOn = booleanPreferencesKey("keep_on")
+        val brightness = floatPreferencesKey("brightness")
         val theme = stringPreferencesKey("theme")
         val fontSize = floatPreferencesKey("font_size")
         val font = stringPreferencesKey("font")
@@ -27,6 +39,18 @@ class ReaderPreferencesRepository(private val context: Context) {
 
     val preferences: Flow<ReaderPreferences> = context.readerDataStore.data.map { values ->
         ReaderPreferences(
+            comicPageMode = values[Keys.comicMode] ?: "continuous",
+            imageFit = values[Keys.imageFit] ?: "screen",
+            pdfPageMode = values[Keys.pdfMode] ?: "continuous",
+            pdfFit = values[Keys.pdfFit] ?: "page-width",
+            pdfInvert = values[Keys.pdfInvert] ?: false,
+            customColors = values[Keys.customColors] ?: false,
+            backgroundHex = values[Keys.backgroundHex] ?: "F7F7F5",
+            textHex = values[Keys.textHex] ?: "222222",
+            indentParagraphs = values[Keys.indent] ?: true,
+            autoNextChapter = values[Keys.autoNext] ?: true,
+            keepScreenOn = values[Keys.keepOn] ?: false,
+            brightness = values[Keys.brightness] ?: -1f,
             theme = values[Keys.theme].asEnumOr(ReaderTheme.DAY),
             fontSizeSp = (values[Keys.fontSize] ?: 18f).coerceIn(14f, 32f),
             fontFamily = values[Keys.font].asEnumOr(ReaderFont.SYSTEM),
@@ -43,7 +67,19 @@ class ReaderPreferencesRepository(private val context: Context) {
     suspend fun update(transform: (ReaderPreferences) -> ReaderPreferences) {
         context.readerDataStore.edit { values ->
             val current = ReaderPreferences(
-                theme = values[Keys.theme].asEnumOr(ReaderTheme.DAY),
+                comicPageMode = values[Keys.comicMode] ?: "continuous",
+            imageFit = values[Keys.imageFit] ?: "screen",
+            pdfPageMode = values[Keys.pdfMode] ?: "continuous",
+                pdfFit = values[Keys.pdfFit] ?: "page-width",
+                pdfInvert = values[Keys.pdfInvert] ?: false,
+                customColors = values[Keys.customColors] ?: false,
+            backgroundHex = values[Keys.backgroundHex] ?: "F7F7F5",
+            textHex = values[Keys.textHex] ?: "222222",
+            indentParagraphs = values[Keys.indent] ?: true,
+            autoNextChapter = values[Keys.autoNext] ?: true,
+            keepScreenOn = values[Keys.keepOn] ?: false,
+            brightness = values[Keys.brightness] ?: -1f,
+            theme = values[Keys.theme].asEnumOr(ReaderTheme.DAY),
                 fontSizeSp = values[Keys.fontSize] ?: 18f,
                 fontFamily = values[Keys.font].asEnumOr(ReaderFont.SYSTEM),
                 lineSpacing = values[Keys.lineSpacing].asEnumOr(SpacingLevel.STANDARD),
@@ -55,6 +91,18 @@ class ReaderPreferencesRepository(private val context: Context) {
                 autoGenerateCover = values[Keys.generateCover] ?: true,
             )
             val updated = transform(current)
+            values[Keys.comicMode] = updated.comicPageMode
+            values[Keys.imageFit] = updated.imageFit
+            values[Keys.pdfMode] = updated.pdfPageMode
+            values[Keys.pdfFit] = updated.pdfFit
+            values[Keys.pdfInvert] = updated.pdfInvert
+            values[Keys.customColors] = updated.customColors
+            values[Keys.backgroundHex] = updated.backgroundHex
+            values[Keys.textHex] = updated.textHex
+            values[Keys.indent] = updated.indentParagraphs
+            values[Keys.autoNext] = updated.autoNextChapter
+            values[Keys.keepOn] = updated.keepScreenOn
+            values[Keys.brightness] = updated.brightness
             values[Keys.theme] = updated.theme.name
             values[Keys.fontSize] = updated.fontSizeSp.coerceIn(14f, 32f)
             values[Keys.font] = updated.fontFamily.name

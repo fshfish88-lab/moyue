@@ -18,16 +18,17 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.moyue.reader.core.ui.MoyueSpacing
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -41,21 +42,31 @@ fun ImportSheet(
     onOpenBrowser: (String) -> Unit,
     onAddWeb: () -> Unit,
     onDismiss: () -> Unit,
+    onNewMarkdown: () -> Unit = {},
+    onPickAnyFile: () -> Unit = onPickFile,
 ) {
     var url by remember(initialUrl) { mutableStateOf(initialUrl) }
-    ModalBottomSheet(onDismissRequest = onDismiss) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        containerColor = MaterialTheme.colorScheme.background,
+        tonalElevation = 0.dp,
+    ) {
         Column(
-            Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+            Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = MoyueSpacing.Page, vertical = MoyueSpacing.Tight),
+            verticalArrangement = Arrangement.spacedBy(MoyueSpacing.Item),
         ) {
-            Text("添加小说", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+            Text("添加内容", style = MaterialTheme.typography.titleLarge)
             Column(
                 Modifier.fillMaxWidth().clickable(onClick = onPickFile).padding(vertical = 14.dp),
             ) {
                 Text("导入文件", fontWeight = FontWeight.Medium)
-                Text("支持 TXT / EPUB，文件会复制到应用私有目录", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("支持 TXT / EPUB / Markdown / PDF / 图片 / CBZ / 图片 ZIP，保存应用内副本", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-            HorizontalDivider()
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                OutlinedButton(onClick = onNewMarkdown) { Text("新建 Markdown") }
+                TextButton(onClick = onPickAnyFile) { Text("显示所有文件") }
+            }
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
             Text("导入网页", fontWeight = FontWeight.Medium)
             OutlinedTextField(
                 value = url,
@@ -67,7 +78,7 @@ fun ImportSheet(
             )
             Button(onClick = { onAnalyzeWeb(url) }, enabled = url.isNotBlank() && !webBusy, modifier = Modifier.fillMaxWidth()) {
                 if (webBusy) CircularProgressIndicator(Modifier.size(18.dp).padding(end = 4.dp), strokeWidth = 2.dp)
-                Text("解析网页")
+                Text("导入书架并阅读")
             }
             OutlinedButton(onClick = { onOpenBrowser(url) }, enabled = url.startsWith("http://") || url.startsWith("https://"), modifier = Modifier.fillMaxWidth()) {
                 Text("在网页中打开")
@@ -99,7 +110,7 @@ fun ImportSheet(
                     Button(onClick = onAddWeb, modifier = Modifier.padding(start = 12.dp)) { Text("加入书架") }
                 }
             }
-            Text("网页导入仅保存当前章节；识别到下一章时会保留链接。", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(bottom = 20.dp))
+            Text("自动识别章节目录，正文按需加载；网站未提供完整目录时保留可识别的章节链接。", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(bottom = 20.dp))
         }
     }
 }

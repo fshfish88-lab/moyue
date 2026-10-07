@@ -36,8 +36,8 @@ class ReadabilityExtractor {
             ?: cleaned.substringAfter("<body", cleaned).substringAfter('>', cleaned).substringBeforeLast("</body>", cleaned)
         val text = htmlToText(candidate)
         if (text.count { !it.isWhitespace() } < 20) throw NoReadableContentException()
-        val title = heading(candidate).ifBlank {
-            documentTitle(html).substringBefore(" · ").substringBefore(" - ").ifBlank { "网页小说" }
+        val title = heading(cleaned).ifBlank {
+            documentTitle(html).substringBefore("_").substringBefore(" · ").substringBefore(" - ").ifBlank { "网页小说" }
         }
         return ReadablePage(
             title = title,
@@ -96,7 +96,7 @@ class ReadabilityExtractor {
                 val href = Regex("(?is)href\\s*=\\s*[\"']([^\"']+)[\"']").find(attributes)?.groupValues?.get(1)
                     ?: return@forEach
                 val resolved = runCatching { base.resolve(href) }.getOrNull() ?: return@forEach
-                if (resolved.scheme.equals("http", true) || resolved.scheme.equals("https", true)) return resolved.toString()
+                if ((resolved.scheme.equals("http", true) || resolved.scheme.equals("https", true)) && resolved.toString().substringBefore('#') != base.toString().substringBefore('#')) return resolved.toString()
             }
         }
         return null

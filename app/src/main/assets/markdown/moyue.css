@@ -1,0 +1,35 @@
+:root{--paper:#f8f7f4;--ink:#252525;--accent:#5c6b58;--size:18px;--line:1.7;--margin:20px;--paragraph:20px;--font:system-ui;--indent:0}
+*{box-sizing:border-box}html,body{margin:0;min-height:100%;background:var(--paper);color:var(--ink)}[hidden]{display:none!important}
+body{font-family:var(--font);overflow-wrap:anywhere}#reading{max-width:860px;margin:auto;padding:24px var(--margin) 64px;min-height:100vh}
+#reading,.vditor-reset,.vditor-ir,.vditor-sv{font-size:var(--size)!important;line-height:var(--line)!important;color:var(--ink)!important;font-family:var(--font)!important}
+#reading h1{font-size:1.65em}#reading h2{font-size:1.35em}#reading h3{font-size:1.12em}#reading h1,#reading h2,#reading h3{margin-top:1.6em;border-color:color-mix(in srgb,var(--ink) 15%,transparent)}
+#reading p{margin:var(--paragraph) 0}#reading a{color:var(--accent)}#reading pre{overflow-x:auto;max-width:100%;padding:14px;border-radius:10px;background:color-mix(in srgb,var(--ink) 6%,var(--paper));color:var(--ink)}
+#reading pre code{white-space:pre;font-size:.84em;font-family:monospace;background:transparent}#reading :not(pre)>code{border-radius:4px;background:color-mix(in srgb,var(--ink) 8%,transparent);padding:2px 5px}
+.table-scroll{overflow-x:auto;margin:16px 0}#reading table{width:max-content;min-width:100%;font-size:.88em}#reading th,#reading td{border:1px solid color-mix(in srgb,var(--ink) 18%,transparent);padding:8px 12px}#reading th{background:color-mix(in srgb,var(--ink) 5%,transparent)}
+#reading blockquote{border-left:3px solid var(--accent);color:var(--ink);opacity:.8}#reading img{max-width:100%;height:auto;border-radius:8px}
+.missing-image{display:block;padding:12px;margin:12px 0;border:1px dashed var(--accent);border-radius:8px;font-size:.8em;opacity:.7}
+.copy-code{display:block;margin-left:auto;margin-bottom:8px;border:1px solid var(--accent);border-radius:6px;background:transparent;color:var(--ink);padding:3px 10px}
+.vditor{border:0!important;background:var(--paper)!important;--panel-background-color:var(--paper);--textarea-background-color:var(--paper);--textarea-text-color:var(--ink);--toolbar-background-color:var(--paper);--toolbar-icon-color:var(--accent);--border-color:#9995;--second-color:#999;min-height:100vh}
+.vditor-toolbar{position:sticky!important;top:0;z-index:5;background:var(--paper)!important;border-bottom:1px solid #8883;display:flex!important;align-items:center;flex-wrap:nowrap;overflow:visible!important;padding:4px 8px!important}.vditor-toolbar__item{flex-shrink:0}
+.vditor-toolbar svg{width:18px;height:18px}.vditor-ir,.vditor-sv{background:var(--paper)!important;min-height:75vh;padding:20px var(--margin) 120px!important}.vditor-ir pre.vditor-reset{padding:0!important}
+.vditor-panel{background:var(--paper)!important;color:var(--ink)!important}.vditor-content{overflow:visible!important}.vditor-ir__marker{color:#8b9388}
+.vditor-ir__marker--heading{color:var(--accent)!important}
+/* Only source mode uses a bounded flex layout. Each pane owns its vertical scroll. */
+body.moyue-source{height:var(--viewport-height,100vh);overflow:hidden}
+body.moyue-source #editing,body.moyue-source #editor{height:100%!important;min-height:0!important}
+body.moyue-source .vditor-toolbar{position:relative!important;flex:0 0 auto}
+body.moyue-source .vditor-content{overflow:hidden!important;flex:1 1 0;min-height:0!important}
+body.moyue-source .vditor-sv,body.moyue-source .vditor-preview{height:100%!important;min-height:0!important;overflow:auto!important;overscroll-behavior:contain;min-width:0}
+body.moyue-source .vditor-sv{padding-bottom:32px!important;resize:none}
+.vditor-preview{background:var(--paper)!important;color:var(--ink)!important}
+.vditor-preview .vditor-reset{padding:20px var(--margin) 32px!important}
+#reading>p,.vditor-preview .vditor-reset>p{margin:var(--paragraph) 0!important;text-indent:var(--indent)}
+.vditor-ir .vditor-reset>p{margin:var(--paragraph) 0!important}
+.vditor-reset pre,.vditor-reset pre code{font-family:monospace!important;text-indent:0}
+/* Wide display formulas scroll locally, so phone reading keeps its page width. */
+.vditor-reset div.language-math{max-width:100%;overflow-x:auto;overflow-y:hidden;text-indent:0;padding:4px 0}
+.vditor-reset .language-math .katex{color:var(--ink)}
+.vditor-reset .language-math .katex-display{margin:.7em 0}
+html,body,#reading,.vditor,.vditor-preview { transition:background-color 200ms cubic-bezier(.4,0,.2,1),color 200ms cubic-bezier(.4,0,.2,1); }
+.moyue-reduce-motion,.moyue-reduce-motion :is(body,#reading,.vditor,.vditor-preview) { transition:none; }
+@media (prefers-reduced-motion:reduce) { html,body,#reading,.vditor,.vditor-preview { transition:none; } }

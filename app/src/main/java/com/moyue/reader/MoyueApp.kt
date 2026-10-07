@@ -5,6 +5,8 @@ import android.net.Uri
 import android.provider.OpenableColumns
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.*
+import androidx.compose.animation.core.tween
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -25,6 +27,7 @@ import androidx.compose.ui.Modifier
 import com.moyue.reader.core.database.BookEntity
 import com.moyue.reader.core.database.ChapterEntity
 import com.moyue.reader.core.settings.ReaderPreferences
+import com.moyue.reader.core.ui.MoyueMotion
 import com.moyue.reader.core.ui.MoyueTheme
 import com.moyue.reader.feature.bookdetail.BookDetailScreen
 import com.moyue.reader.feature.bookshelf.BookshelfScreen
@@ -46,6 +49,9 @@ private sealed interface AppScreen {
     data object Shelf : AppScreen
     data object Settings : AppScreen
     data class Reader(val bookId: Long, val chapterIndex: Int? = null) : AppScreen
+    data class Markdown(val bookId: Long, val edit: Boolean = false) : AppScreen
+    data class Pdf(val bookId: Long) : AppScreen
+    data class Visual(val bookId: Long) : AppScreen
     data class Detail(val bookId: Long) : AppScreen
     data class Browser(val url: String) : AppScreen
 }
@@ -77,15 +83,39 @@ fun MoyueApp(container: MoyueContainer, sharedUrl: String? = null) {
         }
     }
 
+    fun openContent(id: Long, edit: Boolean = false) {
+        scope.launch {
+            val book = container.database.bookDao().get(id) ?: return@launch
+            screen = when (com.moyue.reader.core.document.ReaderEngineRegistry.item(book).format) {
+                com.moyue.reader.core.document.DocumentFormat.MARKDOWN -> AppScreen.Markdown(id,edit)
+                com.moyue.reader.core.document.DocumentFormat.PDF -> AppScreen.Pdf(id)
+                com.moyue.reader.core.document.DocumentFormat.IMAGE, com.moyue.reader.core.document.DocumentFormat.COMIC -> AppScreen.Visual(id)
+                else -> AppScreen.Reader(id)
+            }
+        }
+    }
+
     MoyueTheme {
-        BackHandler(enabled = screen != AppScreen.Shelf && screen !is AppScreen.Reader) { screen = AppScreen.Shelf }
-        when (val destination = screen) {
+        BackHandler(enabled = screen != AppScreen.Shelf && screen !is AppScreen.Reader && screen !is AppScreen.Markdown && screen !is AppScreen.Pdf && screen !is AppScreen.Visual) { screen = AppScreen.Shelf }
+        AnimatedContent(targetState = screen, label = "screen", transitionSpec = {
+            (slideInHorizontally(tween(MoyueMotion.Standard, easing = MoyueMotion.Easing)) { if (targetState == AppScreen.Shelf) -it / 12 else it / 12 } + fadeIn(tween(MoyueMotion.Standard))) togetherWith
+                (slideOutHorizontally(tween(MoyueMotion.Fast, easing = MoyueMotion.Easing)) { if (targetState == AppScreen.Shelf) it / 12 else -it / 12 } + fadeOut(tween(MoyueMotion.Fast)))
+        }) { destination ->
+        when (destination) {
             AppScreen.Shelf -> BookshelfScreen(
                 books = books,
-                onOpenBook = { screen = AppScreen.Reader(it) },
+                onOpenBook = { openContent(it) },
+                onEditMarkdown = { openContent(it, true) },
                 onBookDetails = { screen = AppScreen.Detail(it) },
                 onAddBook = { showImport = true },
                 onSettings = { screen = AppScreen.Settings },
+                onDeleteBook = { id ->
+                    scope.launch {
+                        runCatching { deleteShelfBook(container, id) }
+                            .onSuccess { snackbar.showSnackbar("书籍已删除") }
+                            .onFailure { snackbar.showSnackbar("删除失败，请重试") }
+                    }
+                },
             )
             AppScreen.Settings -> SettingsScreen(
                 preferences = preferences,
@@ -108,12 +138,22 @@ fun MoyueApp(container: MoyueContainer, sharedUrl: String? = null) {
                 onBack = { screen = AppScreen.Shelf },
                 onPreferences = { value -> scope.launch { container.preferences.update { value } } },
             )
+            is AppScreen.Markdown -> com.moyue.reader.feature.markdown.MarkdownScreen(
+                bookId = destination.bookId, container = container, preferences = preferences,
+                startEditing = destination.edit, onBack = { screen = AppScreen.Shelf },
+                onPreferences = { value -> scope.launch { container.preferences.update { value } } },
+            )
+            is AppScreen.Pdf -> com.moyue.reader.feature.pdf.PdfScreen(
+                bookId=destination.bookId, container=container, preferences=preferences,
+                onPreferences={value -> scope.launch {container.preferences.update {value}}}, onBack={screen=AppScreen.Shelf},
+            )
+            is AppScreen.Visual -> com.moyue.reader.feature.image.VisualScreen(destination.bookId, container, preferences, { value -> scope.launch {container.preferences.update {value}} }, {screen=AppScreen.Shelf})
             is AppScreen.Detail -> DetailDestination(
                 bookId = destination.bookId,
                 books = books,
                 container = container,
                 onBack = { screen = AppScreen.Shelf },
-                onRead = { chapter -> screen = AppScreen.Reader(destination.bookId, chapter) },
+                onRead = { openContent(destination.bookId) },
                 onDeleted = { screen = AppScreen.Shelf },
             )
             is AppScreen.Browser -> SafeWebViewScreen(
@@ -127,12 +167,21 @@ fun MoyueApp(container: MoyueContainer, sharedUrl: String? = null) {
                     webError = null
                     scope.launch {
                         runCatching { container.importService.previewWeb(url) }
-                            .onSuccess { webPreview = it }
+                            .onSuccess { preview ->
+                                showImport = false
+                                val result = container.importService.importWeb(preview) { importState = it }
+                                if (result is ImportState.Completed) {
+                                    importState = null
+                                    screen = AppScreen.Reader(result.bookId)
+                                } else importState = result
+                                webPreview = null
+                            }
                             .onFailure { webError = it.message ?: "网页解析失败，请稍后重试" }
                         webBusy = false
                     }
                 },
             )
+        }
         }
         SnackbarHost(snackbar)
         if (showImport) {
@@ -141,7 +190,16 @@ fun MoyueApp(container: MoyueContainer, sharedUrl: String? = null) {
                 preview = webPreview,
                 webBusy = webBusy,
                 webError = webError,
-                onPickFile = { filePicker.launch(arrayOf("text/plain", "application/epub+zip")) },
+                onPickFile = { filePicker.launch(arrayOf("text/plain", "application/epub+zip", "text/markdown", "text/x-markdown", "application/pdf", "image/jpeg", "image/png", "image/webp", "application/zip", "application/x-cbz", "application/vnd.comicbook+zip")) },
+                onPickAnyFile = { filePicker.launch(arrayOf("*/*")) },
+                onNewMarkdown = {
+                    showImport = false
+                    scope.launch {
+                        val result = container.importService.newMarkdown()
+                        if (result is ImportState.Completed) screen = AppScreen.Markdown(result.bookId, true)
+                        else importState = result
+                    }
+                },
                 onAnalyzeWeb = { url ->
                     pendingWebUrl = url
                     webBusy = true
@@ -149,7 +207,15 @@ fun MoyueApp(container: MoyueContainer, sharedUrl: String? = null) {
                     webPreview = null
                     scope.launch {
                         runCatching { container.importService.previewWeb(url) }
-                            .onSuccess { webPreview = it }
+                            .onSuccess { preview ->
+                                showImport = false
+                                val result = container.importService.importWeb(preview) { importState = it }
+                                if (result is ImportState.Completed) {
+                                    importState = null
+                                    screen = AppScreen.Reader(result.bookId)
+                                } else importState = result
+                                webPreview = null
+                            }
                             .onFailure { webError = it.message ?: "网页解析失败，请检查地址后重试" }
                         webBusy = false
                     }
@@ -167,7 +233,12 @@ fun MoyueApp(container: MoyueContainer, sharedUrl: String? = null) {
                 onDismiss = { showImport = false; webPreview = null; webError = null },
             )
         }
-        importState?.let { state -> ImportProgressDialog(state) { importState = null } }
+        importState?.let { state ->
+            ImportProgressDialog(state, onDismiss = { importState = null }, onRead = {
+                importState = null
+                if(state is ImportState.Completed) openContent(state.bookId)
+            })
+        }
     }
 }
 
@@ -179,30 +250,49 @@ private fun ReaderDestination(
     onBack: () -> Unit,
     onPreferences: (ReaderPreferences) -> Unit,
 ) {
-    val viewModel = remember(destination.bookId) {
-        ReaderViewModel(ReaderRepository(RoomReaderDataSource(container.database, container.storage)))
+    val store = remember(destination.bookId) { androidx.lifecycle.ViewModelStore() }
+    val viewModel = remember(store) {
+        val factory = object : androidx.lifecycle.ViewModelProvider.Factory {
+            override fun <T : androidx.lifecycle.ViewModel> create(modelClass: Class<T>): T =
+                requireNotNull(modelClass.cast(ReaderViewModel(ReaderRepository(RoomReaderDataSource(container.database, container.storage)))))
+        }
+        androidx.lifecycle.ViewModelProvider(store, factory)[ReaderViewModel::class.java]
     }
+    androidx.compose.runtime.DisposableEffect(store) { onDispose { store.clear() } }
     val state by viewModel.state.collectAsState()
+    val openError by viewModel.openError.collectAsState()
     val scope = rememberCoroutineScope()
     LaunchedEffect(destination.bookId, destination.chapterIndex) {
         viewModel.open(destination.bookId, destination.chapterIndex)
+        viewModel.updatePreferences(preferences)
     }
     LaunchedEffect(preferences) { viewModel.updatePreferences(preferences) }
     BackHandler {
-        scope.launch { viewModel.flushProgress(); onBack() }
+        scope.launch { viewModel.flushProgressOnBack(); onBack() }
     }
     val current = state
     if (current == null) {
-        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            if (openError == null) CircularProgressIndicator()
+            else androidx.compose.foundation.layout.Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                androidx.compose.material3.Text(requireNotNull(openError))
+                androidx.compose.material3.TextButton(onClick = { scope.launch { viewModel.open(destination.bookId, destination.chapterIndex); viewModel.updatePreferences(preferences) } }) { androidx.compose.material3.Text("重试") }
+                androidx.compose.material3.TextButton(onClick = { scope.launch { viewModel.open(destination.bookId, 0); viewModel.updatePreferences(preferences) } }) { androidx.compose.material3.Text("从第一章打开") }
+                androidx.compose.material3.TextButton(onClick = onBack) { androidx.compose.material3.Text("返回书架") }
+            }
+        }
     } else {
         ReaderScreen(
             state = current,
-            onBack = { scope.launch { viewModel.flushProgress(); onBack() } },
+            onBack = { scope.launch { viewModel.flushProgressOnBack(); onBack() } },
             onToggleControls = viewModel::toggleControls,
             onPrevious = { scope.launch { viewModel.goPrevious() } },
             onNext = { scope.launch { viewModel.goNext() } },
             onChapter = { scope.launch { viewModel.goTo(it) } },
             onPosition = viewModel::updatePosition,
+            onScrollPosition = viewModel::updateScrollPosition,
+            onPrefetch = { scope.launch { viewModel.prefetchFollowing() } },
+            onRefreshCatalog = { scope.launch { viewModel.refreshCatalog() } },
             onPreferences = { viewModel.updatePreferences(it); onPreferences(it) },
         )
     }
@@ -214,13 +304,20 @@ private fun DetailDestination(
     books: List<BookEntity>,
     container: MoyueContainer,
     onBack: () -> Unit,
-    onRead: (Int) -> Unit,
+    onRead: () -> Unit,
     onDeleted: () -> Unit,
 ) {
     val book = books.firstOrNull { it.id == bookId }
     var chapters by remember(bookId) { mutableStateOf<List<ChapterEntity>>(emptyList()) }
+    var documentMetadata by remember(bookId) { mutableStateOf<com.moyue.reader.core.database.DocumentMetadataEntity?>(null) }
+    var imageSize by remember(bookId) {mutableStateOf<String?>(null)}
     val scope = rememberCoroutineScope()
-    LaunchedEffect(bookId) { chapters = container.database.chapterDao().forBook(bookId) }
+    LaunchedEffect(bookId) { chapters = container.database.chapterDao().forBook(bookId); documentMetadata = container.database.documentDao().metadata(bookId)
+        if(documentMetadata?.format=="IMAGE") withContext(Dispatchers.IO) {
+            val source=container.database.bookDao().get(bookId)?.sourcePath?.let {java.io.File(it)}
+            source?.let {runCatching {com.moyue.reader.feature.image.ImageProbe.file(it)}.getOrNull()}?.let {imageSize="${it.width} × ${it.height}"}
+        }
+    }
     if (book == null) {
         LaunchedEffect(Unit) { onBack() }
         return
@@ -232,15 +329,22 @@ private fun DetailDestination(
         onRead,
         onDelete = {
             scope.launch {
-                withContext(Dispatchers.IO) {
-                    container.storage.bookDirectory(bookId).deleteRecursively()
-                    container.storage.epubCache(bookId).parentFile?.deleteRecursively()
-                    container.database.bookDao().delete(book)
-                }
+                deleteShelfBook(container, bookId)
                 onDeleted()
             }
         },
+        documentMetadata = documentMetadata,
+        imageSize = imageSize,
     )
+}
+
+private suspend fun deleteShelfBook(container: MoyueContainer, bookId: Long) = withContext(Dispatchers.IO) {
+    val book = container.database.bookDao().get(bookId) ?: return@withContext
+    val files = container.storage.bookDirectory(bookId)
+    val cache = container.storage.epubCache(bookId).parentFile
+    check(!files.exists() || files.deleteRecursively()) { "无法删除书籍副本" }
+    check(cache == null || !cache.exists() || cache.deleteRecursively()) { "无法删除书籍缓存" }
+    container.database.bookDao().delete(book)
 }
 
 private fun displayName(context: Context, uri: Uri): String? = runCatching {

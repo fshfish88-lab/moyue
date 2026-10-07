@@ -7,6 +7,7 @@ data class ReaderPage(
     val text: String,
     val start: ReaderPosition,
     val end: ReaderPosition,
+    val image: ContentBlock.Image? = null,
 )
 
 class ReaderPaginator {
@@ -33,6 +34,40 @@ class ReaderPaginator {
                         end = positionFor(end, texts, blockStarts),
                     ),
                 )
+                start = end
+            }
+        }
+    }
+
+    fun paginateMeasured(blocks: List<ContentBlock>, indent: Boolean, separator: String = "\n\n", fits: (String) -> Boolean): List<ReaderPage> {
+        val original = blocks.map(::plainText)
+        val prefixes = blocks.map { if (indent && it is ContentBlock.Text) "　　" else "" }
+        val texts = original.mapIndexed { i, text -> prefixes[i] + text.trimStart() }
+        val starts = mutableListOf<Int>()
+        var total = 0
+        texts.forEach { starts += total; total += it.length + separator.length }
+        val full = texts.joinToString(separator)
+        fun position(offset: Int): ReaderPosition {
+            val i = starts.indexOfLast { it <= offset }.coerceAtLeast(0)
+            if (texts.isEmpty()) return ReaderPosition(0, 0)
+            val leading = original[i].length - original[i].trimStart().length
+            return ReaderPosition(i, (offset - starts[i] - prefixes[i].length + leading).coerceIn(0, original[i].length))
+        }
+        if (full.isEmpty()) return listOf(ReaderPage("", ReaderPosition(0, 0), ReaderPosition(0, 0)))
+        return buildList {
+            var start = 0
+            while (start < full.length) {
+                var low = start + 1
+                var high = full.length
+                var end = start
+                while (low <= high) {
+                    val mid = (low + high) / 2
+                    if (fits(full.substring(start, mid))) { end = mid; low = mid + 1 } else high = mid - 1
+                }
+                // Do not split UTF-16 surrogate pairs between pages.
+                if (end < full.length && end > start && full[end - 1].isHighSurrogate() && full[end].isLowSurrogate()) end--
+                require(end > start) { "阅读区域太小，请减小字号或边距" }
+                add(ReaderPage(full.substring(start, end), position(start), position(end)))
                 start = end
             }
         }

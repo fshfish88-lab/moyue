@@ -20,6 +20,7 @@ data class EpubPackage(
     val packageDirectory: File,
     val spine: List<EpubSpineItem>,
     val cover: EpubSpineItem?,
+    val chapterTitles: Map<String, String> = emptyMap(),
 )
 
 class EpubPackageParser(
@@ -46,11 +47,38 @@ class EpubPackageParser(
         val coverId = document.elements("meta")
             .firstOrNull { it.getAttribute("name").equals("cover", true) }
             ?.getAttribute("content")
+        val directory = requireNotNull(opfFile.parentFile)
+        val titles = linkedMapOf<String, String>()
+        manifest.values.filter { it.mediaType == "application/x-dtbncx+xml" || "nav" in it.properties.split(' ') }.forEach { item ->
+            val file = safeResolve(directory, item.href)
+            val navigation = runCatching { parseXml(file) }.getOrNull() ?: return@forEach
+            navigation.elements("navPoint").forEach { point ->
+                val content = point.getElementsByTagNameNS("*", "content").item(0) as? Element
+                val label = point.getElementsByTagNameNS("*", "text").item(0)?.textContent?.trim()
+                val href = content?.getAttribute("src")?.substringBefore('#')
+                if (!href.isNullOrBlank() && !label.isNullOrBlank()) {
+                    val target = safeResolve(directory, directory.toPath().relativize(requireNotNull(file.parentFile).toPath()).resolve(href).toString())
+                    titles.putIfAbsent(target.canonicalPath, label)
+                }
+            }
+            navigation.elements("nav").filter { it.getAttribute("epub:type") == "toc" || it.getAttribute("role") == "doc-toc" }.forEach { nav ->
+                val links = nav.getElementsByTagNameNS("*", "a")
+                for (i in 0 until links.length) {
+                    val a = links.item(i) as? Element ?: continue
+                    val href = a.getAttribute("href").substringBefore('#')
+                    if (href.isNotBlank()) {
+                        val target = safeResolve(directory, directory.toPath().relativize(requireNotNull(file.parentFile).toPath()).resolve(href).toString())
+                        titles.putIfAbsent(target.canonicalPath, a.textContent.trim())
+                    }
+                }
+            }
+        }
         return EpubPackage(
             title = document.elements("title").firstOrNull()?.textContent?.trim().orEmpty().ifBlank { "未命名书籍" },
             author = document.elements("creator").firstOrNull()?.textContent?.trim()?.takeIf(String::isNotBlank),
             packageDirectory = requireNotNull(opfFile.parentFile),
             spine = spine,
+            chapterTitles = titles,
             cover = manifest.values.firstOrNull { "cover-image" in it.properties.split(' ') }
                 ?: coverId?.let(manifest::get),
         )

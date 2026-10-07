@@ -29,4 +29,8 @@ class MoyueContainer(val applicationContext: Application) {
         RoomAtomicImportStore(database, storage, GeneratedCoverFileWriter()),
     )
     val importService = ImportService(applicationContext, importCoordinator)
+    val markdown = com.moyue.reader.feature.markdown.MarkdownRepository(applicationContext, database, storage)
+    val visuals = com.moyue.reader.feature.image.VisualRepository(database, storage)
+    val documents = com.moyue.reader.feature.pdf.PdfRepository(database, storage)
+    val documentWrites = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO)
 }

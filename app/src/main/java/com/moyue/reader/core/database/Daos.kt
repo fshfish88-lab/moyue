@@ -22,10 +22,14 @@ interface BookDao {
     @Insert suspend fun insert(book: BookEntity): Long
     @Update suspend fun update(book: BookEntity)
     @Delete suspend fun delete(book: BookEntity)
+    @Query("UPDATE books SET progress = :progress, lastReadAt = :time WHERE id = :id") suspend fun updateReading(id: Long, progress: Float, time: Long)
+    @Query("UPDATE books SET coverPath = :path WHERE id = :id") suspend fun updateCover(id: Long, path: String)
 }
 
 @Dao
 interface ChapterDao {
+    @Update suspend fun update(chapter: ChapterEntity)
+
     @Query("SELECT * FROM chapters WHERE bookId = :bookId ORDER BY chapterIndex")
     suspend fun forBook(bookId: Long): List<ChapterEntity>
 
@@ -43,4 +47,15 @@ interface ReadingProgressDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(progress: ReadingProgressEntity)
+}
+
+@Dao
+interface DocumentDao {
+    @Query("SELECT * FROM document_metadata WHERE bookId = :bookId") suspend fun metadata(bookId: Long): DocumentMetadataEntity?
+    @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun upsertMetadata(value: DocumentMetadataEntity)
+    @Query("SELECT * FROM document_states WHERE bookId = :bookId") suspend fun state(bookId: Long): DocumentStateEntity?
+    @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun upsertState(value: DocumentStateEntity)
+    @Query("SELECT * FROM document_bookmarks WHERE bookId = :bookId ORDER BY createdAt DESC") fun bookmarks(bookId: Long): Flow<List<DocumentBookmarkEntity>>
+    @Insert suspend fun addBookmark(value: DocumentBookmarkEntity): Long
+    @Query("DELETE FROM document_bookmarks WHERE id = :id") suspend fun deleteBookmark(id: Long)
 }

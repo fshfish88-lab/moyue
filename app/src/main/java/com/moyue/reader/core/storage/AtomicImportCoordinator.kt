@@ -43,7 +43,7 @@ fun interface AtomicImportStore {
 }
 
 fun interface CoverFileGenerator {
-    fun generate(title: String, destination: File): File
+    fun generate(title: String, author: String?, destination: File): File
 }
 
 class RecoverableImportException(message: String, cause: Throwable? = null) :
@@ -130,7 +130,7 @@ class AtomicImportCoordinator(
 
     private fun safeExtension(extension: String): String {
         val normalized = extension.lowercase().removePrefix(".")
-        if (normalized !in setOf("txt", "epub", "html")) {
+        if (normalized !in setOf("txt", "epub", "html", "md", "pdf", "jpg", "jpeg", "png", "webp", "cbz", "zip")) {
             throw FatalImportException("不支持的文件格式")
         }
         return normalized
@@ -153,6 +153,16 @@ class RoomAtomicImportStore(
     override suspend fun commit(prepared: PreparedImport): Long {
         var publishedDirectory: File? = null
         var publishedCache: File? = null
+        // Rasterizing and PNG-encoding a 1200x1680 cover takes tens of milliseconds. Doing it before
+        // the transaction keeps that work off the database lock; the finished file is then moved into
+        // the book directory inside the transaction, so a failure still rolls back cleanly.
+        val stagedCover = coverGenerator
+            ?.takeIf { prepared.book.coverPath == null }
+            ?.generate(
+                prepared.book.title,
+                prepared.book.author,
+                prepared.stagedDirectory.resolve("generated-cover.png"),
+            )
         try {
             return database.withTransaction {
                 val bookDao = database.bookDao()
@@ -177,6 +187,10 @@ class RoomAtomicImportStore(
                 publishedDirectory = destination
                 val finalSource = storage.sourceFile(bookId, prepared.sourceExtension)
                 move(prepared.stagedSource, finalSource)
+                if (prepared.book.document?.format in setOf("IMAGE", "COMIC")) {
+                    val index = prepared.stagedDirectory.resolve("visual-index.json")
+                    if (index.isFile) move(index, destination.resolve("visual-index.json"))
+                }
                 val importedCover = prepared.book.coverPath?.let { sourcePath ->
                     val sourceCover = File(sourcePath)
                     if (sourceCover.isFile) {
@@ -184,13 +198,18 @@ class RoomAtomicImportStore(
                         destination.resolve("cover.$extension").also { sourceCover.copyTo(it, overwrite = true) }.absolutePath
                     } else null
                 }
-                val finalCover = importedCover ?: coverGenerator
-                    ?.generate(prepared.book.title, storage.coverFile(bookId))?.absolutePath
+                val finalCover = importedCover ?: stagedCover?.let { staged ->
+                    if (!staged.isFile) null
+                    else storage.coverFile(bookId).also { target ->
+                        target.parentFile?.mkdirs()
+                        move(staged, target)
+                    }.absolutePath
+                }
                 val stagedDerived = prepared.stagedDirectory.resolve(
                     "derived/${prepared.book.sourceType.name.lowercase()}",
                 )
                 val finalCache = when (prepared.book.sourceType) {
-                    SourceType.TXT -> null
+                    SourceType.TXT, SourceType.MARKDOWN, SourceType.DOCUMENT -> null
                     SourceType.EPUB -> storage.epubCache(bookId)
                     SourceType.WEB -> storage.webCache(bookId)
                 }
@@ -207,6 +226,11 @@ class RoomAtomicImportStore(
                         coverPath = finalCover,
                     ),
                 )
+                prepared.book.document?.let { metadata ->
+                    database.documentDao().upsertMetadata(com.moyue.reader.core.database.DocumentMetadataEntity(
+                        bookId, metadata.format, metadata.mimeType, metadata.byteSize, metadata.pageCount, metadata.locked,
+                    ))
+                }
                 chapterDao.insertAll(
                     prepared.book.chapters.map { chapter ->
                         ChapterEntity(

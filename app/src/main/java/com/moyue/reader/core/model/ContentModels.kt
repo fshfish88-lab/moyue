@@ -2,7 +2,7 @@ package com.moyue.reader.core.model
 
 import java.io.File
 
-enum class SourceType { TXT, EPUB, WEB }
+enum class SourceType { TXT, EPUB, WEB, MARKDOWN, DOCUMENT }
 
 sealed interface ContentBlock {
     data class Text(val text: String) : ContentBlock
@@ -48,6 +48,7 @@ data class ParsedBook(
     val coverPath: String? = null,
     val wordCount: Long = 0,
     val textEncoding: String? = null,
+    val document: com.moyue.reader.core.document.DocumentMetadata? = null,
 )
 
 data class ParseInput(
