@@ -27,7 +27,8 @@ class WebReaderSmokeInstrumentation:Instrumentation() {
     private fun nodes():List<AccessibilityNodeInfo> {
         val list=mutableListOf<AccessibilityNodeInfo>()
         fun walk(n:AccessibilityNodeInfo){list+=n;for(i in 0 until n.childCount)n.getChild(i)?.let {walk(it)}}
-        uiAutomation.rootInActiveWindow?.let {walk(it)};return list
+        val root=uiAutomation.rootInActiveWindow ?: uiAutomation.windows.mapNotNull {it.root}.lastOrNull {it.packageName=="com.moyue.reader"}
+        root?.let {walk(it)};return list
     }
     private fun find(s:String)=nodes().lastOrNull {it.text?.toString()==s || it.contentDescription?.toString()==s}
     private fun waitFor(s:String):AccessibilityNodeInfo {repeat(100){find(s)?.let {return it};SystemClock.sleep(100)};error("Missing $s; "+nodes().mapNotNull {it.text ?: it.contentDescription})}
@@ -60,6 +61,7 @@ class WebReaderSmokeInstrumentation:Instrumentation() {
         lateinit var c:com.moyue.reader.MoyueContainer
         var initialized=false
         try {
+            uiAutomation.serviceInfo=uiAutomation.serviceInfo.apply {flags=flags or android.accessibilityservice.AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS}
             runOnMainSync {c=(targetContext.applicationContext as MoyueApplication).container}
             initialized=true
             val original=runBlocking {c.database.bookDao().observeAll().first()}
@@ -193,7 +195,7 @@ class WebReaderSmokeInstrumentation:Instrumentation() {
                 for(book in original){verify(c.database.bookDao().get(book.id)==book,"oldRowUnchanged${book.id}");verify(com.moyue.reader.feature.image.VisualRepository.hash(java.io.File(book.sourcePath))==originalHashes[book.id],"oldSourceUnchanged${book.id}")}
             }
             out.putString("stream","PASS web reader checks=${checks.length()}")
-        }catch(e:Throwable){out.putString("stream","FAIL ${e.stackTraceToString()}")}
+        }catch(e:Throwable){runCatching {capture("failure")};out.putString("stream","FAIL ${e.stackTraceToString()}")}
         finally {
             runBlocking {if(initialized){restore?.let {old->c.preferences.update {old}};for(id in owned){c.database.bookDao().get(id)?.let {c.database.bookDao().delete(it)};c.storage.bookDirectory(id).deleteRecursively();c.storage.webCache(id).deleteRecursively()}}}
             out.putString("checks",checks.toString());finish(if(out.getString("stream").orEmpty().startsWith("PASS"))-1 else 0,out)

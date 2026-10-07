@@ -216,7 +216,7 @@ class RoomReaderDataSource(
             message(if(result.complete)"已识别 ${catalog.size} 章；可刷新获取更新" else "目录可能未完整：已识别 ${catalog.size} 章，可刷新重试")
             database.chapterDao().forBook(book.id)
         } catch (error: kotlinx.coroutines.CancellationException) { throw error
-        } catch (error: Exception) {message("目录刷新失败：${error.message ?: "网页暂不可访问"}；已保留原章节"); rows }
+        } catch (_: Exception) {message("目录刷新失败，请确认网页可以正常访问；已保留原 ${rows.size} 章"); rows }
     }
 
     override suspend fun progress(bookId: Long) = database.readingProgressDao().get(bookId)
