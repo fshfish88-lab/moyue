@@ -15,9 +15,9 @@ android {
         applicationId = "com.moyue.reader"
         minSdk = 26
         targetSdk = 36
-        versionCode = 19
-        // V1.5.2: continuous catalog, explicit close, refresh and compact paged top spacing.
-        versionName = "1.5.2"
+        versionCode = 22
+        // V1.5.4: complete web catalogs and verified GitHub app updates.
+        versionName = "1.5.4"
         testInstrumentationRunner = "com.moyue.reader.feature.pdf.PdfSmokeInstrumentation"
     }
 
@@ -51,6 +51,7 @@ ksp {
 }
 
 dependencies {
+    implementation("org.jsoup:jsoup:1.21.2")
     implementation("io.github.panpf.zoomimage:zoomimage-compose-coil3:1.4.0")
     implementation("androidx.core:core-ktx:1.17.0")
     implementation("androidx.webkit:webkit:1.14.0")

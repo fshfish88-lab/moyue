@@ -113,7 +113,7 @@ class RoomReaderDataSource(
     private val database: MoyueDatabase,
     private val storage: BookStorage,
     private val txtLoader: TxtChapterLoader = TxtChapterLoader(),
-    private val webFetcher: WebContentFetcher = WebContentFetcher(),
+    private val webFetcher: com.moyue.reader.parser.web.WebPageSource = WebContentFetcher(),
     private val webExtractor: ReadabilityExtractor = ReadabilityExtractor(),
 ) : ReaderDataSource {
     override suspend fun book(bookId: Long) = database.bookDao().get(bookId)
@@ -124,7 +124,7 @@ class RoomReaderDataSource(
     }
     override suspend fun catalogMessage(bookId:Long):String? = withContext(Dispatchers.IO) {
         if(database.bookDao().get(bookId)?.sourceType!=SourceType.WEB)return@withContext null
-        val file=storage.webCache(bookId).resolve("catalog-v8.status")
+        val file=storage.webCache(bookId).resolve("catalog-v9.status")
         if(file.isFile)file.readText() else "目录可能未完整，可点击刷新目录重试"
     }
     override suspend fun chapters(bookId: Long): List<ChapterEntity> = withContext(Dispatchers.IO) {
@@ -152,21 +152,27 @@ class RoomReaderDataSource(
         }.getOrElse { rows }
     }
     private suspend fun refreshWebCatalog(book: BookEntity, rows: List<ChapterEntity>,force:Boolean=false): List<ChapterEntity> {
-        val marker = storage.webCache(book.id).resolve("catalog-v8.done")
-        val status=storage.webCache(book.id).resolve("catalog-v8.status")
+        val marker = storage.webCache(book.id).resolve("catalog-v9.done")
+        val status=storage.webCache(book.id).resolve("catalog-v9.status")
         fun message(text:String){status.parentFile?.mkdirs();status.writeText(text)}
         if (marker.exists() && !force) return rows
         if(force)marker.delete()
+        val trace=com.moyue.reader.parser.web.WebCatalogTrace()
         return try {
             val parser = com.moyue.reader.parser.web.WebCatalogExtractor()
+            val catalogFile=storage.bookDirectory(book.id).resolve("web-catalog.url")
+            val preferred=catalogFile.takeIf {it.isFile}?.readText()?.trim()?.takeIf {value->
+                runCatching {java.net.URI(value).let {it.scheme?.lowercase() in setOf("http","https") && !it.host.isNullOrBlank()}}.getOrDefault(false)
+            }
+            trace.record("SAVED_CATALOG",preferred)
             val originalUrl=book.sourceUrl ?: return rows
             val recovered=storage.webCache(book.id).resolve("source-recovered.html")
             val recoveredUrl=recovered.resolveSibling("source-recovered.url")
             var page=com.moyue.reader.parser.web.FetchedWebPage(if(recoveredUrl.isFile)recoveredUrl.readText() else originalUrl,
                 (if(recovered.isFile)recovered else File(book.sourcePath)).readText())
-            if(force)page=webFetcher.fetch(page.finalUrl)
+            if(force && (preferred==null || preferred==page.finalUrl))page=trace.fetch(webFetcher,page.finalUrl)
             if('\uFFFD' in page.html || '\uFFFD' in book.title || rows.any {'\uFFFD' in it.title}) {
-                val fetched=webFetcher.fetch(page.finalUrl)
+                val fetched=trace.fetch(webFetcher,page.finalUrl)
                 if('\uFFFD' !in fetched.html) {
                     recovered.parentFile?.mkdirs()
                     recovered.writeText(fetched.html);recoveredUrl.writeText(fetched.finalUrl);page=fetched
@@ -177,7 +183,21 @@ class RoomReaderDataSource(
                 val latest=database.bookDao().get(book.id) ?: return rows
                 database.bookDao().update(latest.copy(title=readable.title))
             }
-            val result=com.moyue.reader.parser.web.WebCatalogLoader(webFetcher::fetch,parser).load(page)
+            var result=com.moyue.reader.parser.web.WebCatalogLoader({trace.fetch(webFetcher,it)},parser).load(page,preferred,trace)
+            if(!result.complete && webFetcher.supportsRendering) {
+                message("正在用浏览器重新读取完整目录…")
+                try {
+                    val retryUrl=result.directoryUrl ?: preferred ?: page.finalUrl
+                    val rendered=trace.fetch(webFetcher,retryUrl,render=true)
+                    val retry=com.moyue.reader.parser.web.WebCatalogLoader({trace.fetch(webFetcher,it,render=true)},parser)
+                        .load(rendered,rendered.finalUrl.takeIf {result.directoryUrl!=null || preferred!=null},trace)
+                    if(retry.complete || retry.entries.size>result.entries.size)result=retry
+                } catch(error:kotlinx.coroutines.CancellationException){throw error}
+                  catch(error:Exception){trace.record("RENDER_RETRY_FAILED",result.directoryUrl,error.javaClass.simpleName)}
+            }
+            if(result.complete && result.directoryUrl!=null) {
+                catalogFile.parentFile?.mkdirs();catalogFile.writeText(requireNotNull(result.directoryUrl))
+            }
             if(result.entries.isEmpty()) {
                 message("没有找到完整章节列表，已保留原 ${rows.size} 章；可刷新目录重试")
                 if(readable!=null && rows.size==1 && '\uFFFD' in rows[0].title && '\uFFFD' !in readable.title)
@@ -195,7 +215,7 @@ class RoomReaderDataSource(
                 }
                 return url.substringBefore('#')
             }
-            val placeholders=rows.filter {rows.size==1 && identity(it.sourceUrl)==result.directoryUrl && !parser.isChapterTitle(it.title)}
+            val placeholders=rows.filter {rows.size==1 && identity(it.sourceUrl)==result.directoryUrl && result.entries.none {entry->entry.url==identity(it.sourceUrl)}}
             val retained=rows.filter {it !in placeholders && result.entries.none {entry->entry.url==identity(it.sourceUrl)}}
             val catalog=parser.order(result.entries+retained.mapNotNull {r->identity(r.sourceUrl)?.let {com.moyue.reader.parser.web.WebCatalogEntry(r.title,it)}})
             database.withTransaction {
@@ -216,7 +236,8 @@ class RoomReaderDataSource(
             message(if(result.complete)"已识别 ${catalog.size} 章；可刷新获取更新" else "目录可能未完整：已识别 ${catalog.size} 章，可刷新重试")
             database.chapterDao().forBook(book.id)
         } catch (error: kotlinx.coroutines.CancellationException) { throw error
-        } catch (_: Exception) {message("目录刷新失败，请确认网页可以正常访问；已保留原 ${rows.size} 章"); rows }
+        } catch (error: Exception) {trace.record("FAILED",book.sourceUrl,error.javaClass.simpleName);message("目录刷新失败，请确认网页可以正常访问；已保留原 ${rows.size} 章"); rows }
+        finally {val file=storage.webCache(book.id).resolve("catalog-diagnostic.txt");file.parentFile?.mkdirs();file.writeText(trace.text())}
     }
 
     override suspend fun progress(bookId: Long) = database.readingProgressDao().get(bookId)

@@ -12,12 +12,14 @@ class WebCatalogLoader(
     private val maxPages:Int=200,
     private val maxEntries:Int=50_000,
 ) {
-    suspend fun load(initial:FetchedWebPage):WebCatalogResult {
+    suspend fun load(initial:FetchedWebPage,catalogUrl:String?=null,trace:WebCatalogTrace?=null):WebCatalogResult {
         val path=URI(initial.finalUrl).path.orEmpty()
-        val directory=initial.finalUrl.takeIf {parser.chapters(initial.html,it).isNotEmpty() && Regex("(?:index|list|catalog|directory)[^/]*$",RegexOption.IGNORE_CASE).containsMatchIn(path)}
+        val directory=catalogUrl ?: initial.finalUrl.takeIf {parser.chapters(initial.html,it).isNotEmpty() && Regex("(?:index|list|catalog|directory)[^/]*$",RegexOption.IGNORE_CASE).containsMatchIn(path)}
+            ?: initial.finalUrl.takeIf {parser.isDirectoryPage(initial.html,it)}
             ?: parser.directoryUrl(initial.html,initial.finalUrl)
             ?: initial.finalUrl.takeIf {parser.chapters(initial.html,it).size>=2 && path.endsWith('/')}
             ?: return WebCatalogResult(emptyList(),false,null)
+        trace?.record("CATALOG",directory)
         val prefix=URI(directory).path.orEmpty().substringBeforeLast('/',"")+"/"
         val pending=ArrayDeque<String>();pending.add(directory)
         val visited=mutableSetOf<String>();val entries=linkedMapOf<String,WebCatalogEntry>()
@@ -30,17 +32,22 @@ class WebCatalogLoader(
                 catch(e:CancellationException){throw e} catch(_:Exception){complete=false;continue}
             visited.add(page.finalUrl)
             val found=parser.chapters(page.html,page.finalUrl)
+            trace?.record("PAGE",page.finalUrl,"entries=${found.size} first=${found.firstOrNull()?.title} last=${found.lastOrNull()?.title}")
             if(found.isEmpty())complete=false
             for(entry in found) {
                 if(entries.size>=maxEntries && entry.url !in entries){complete=false;break}
                 entries.putIfAbsent(entry.url,entry)
             }
-            for(next in parser.directoryPages(page.html,page.finalUrl)) {
+            val nextPages=parser.directoryPages(page.html,page.finalUrl)
+            nextPages.forEach {trace?.record("NEXT_PAGE",it)}
+            for(next in nextPages) {
                 // A footer's site-wide home/index page is never part of this book's directory.
                 if(URI(next).path.orEmpty().startsWith(prefix) && next !in visited && next !in pending)pending.add(next)
             }
         }
         val ordered=parser.order(entries.values.toList())
-        return WebCatalogResult(ordered,complete && !parser.startsAfterFirstChapter(ordered),directory)
+        val finished=complete && !parser.startsAfterFirstChapter(ordered)
+        trace?.record("RESULT",directory,"entries=${ordered.size} pages=${visited.size} complete=$finished")
+        return WebCatalogResult(ordered,finished,directory)
     }
 }

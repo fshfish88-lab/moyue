@@ -109,6 +109,8 @@ fun ReaderScreen(
     onScrollPosition: (Long, ReaderPosition, Float) -> Unit,
     onPrefetch: () -> Unit,
     onRefreshCatalog:()->Unit={},
+    onCatalogSource:(()->Unit)?=null,
+    onCatalogDiagnostic:(()->Unit)?=null,
 ) {
     var showChapters by remember { mutableStateOf(false) }
     var showSettings by remember { mutableStateOf(false) }
@@ -186,6 +188,8 @@ fun ReaderScreen(
                 catalogMessage=state.catalogMessage,
                 refreshing=state.catalogRefreshing,
                 onRefresh=onRefreshCatalog.takeIf {state.catalogMessage!=null},
+                onSource=onCatalogSource.takeIf {state.catalogMessage!=null},
+                onDiagnostic=onCatalogDiagnostic.takeIf {state.catalogMessage!=null},
             )
         }
         if (showSettings) {

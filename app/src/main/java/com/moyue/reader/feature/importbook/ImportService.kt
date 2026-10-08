@@ -28,7 +28,7 @@ data class WebImportPreview(val fetched: FetchedWebPage, val readable: ReadableP
 class ImportService(
     private val context: Context,
     private val coordinator: AtomicImportCoordinator,
-    private val fetcher: WebContentFetcher = WebContentFetcher(),
+    private val fetcher: com.moyue.reader.parser.web.WebPageSource = WebContentFetcher(),
     private val extractor: ReadabilityExtractor = ReadabilityExtractor(),
 ) {
     suspend fun importDocument(
@@ -87,6 +87,10 @@ class ImportService(
     suspend fun previewWeb(url: String): WebImportPreview {
         val fetched = fetcher.fetch(url.trim())
         return WebImportPreview(fetched, extractor.extract(fetched.html, fetched.finalUrl))
+    }
+
+    suspend fun previewWeb(page: FetchedWebPage): WebImportPreview = withContext(Dispatchers.IO) {
+        WebImportPreview(page, extractor.extract(page.html,page.finalUrl))
     }
 
     suspend fun importWeb(

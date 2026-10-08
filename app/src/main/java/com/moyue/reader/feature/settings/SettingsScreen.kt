@@ -40,6 +40,10 @@ fun SettingsScreen(
     onPreferences: (ReaderPreferences) -> Unit,
     onClearCache: () -> Unit,
     onBookshelf: () -> Unit,
+    updateState: com.moyue.reader.feature.update.AppUpdateState,
+    onAutomaticUpdates: (Boolean) -> Unit,
+    onCheckUpdates: () -> Unit,
+    onOpenUpdate: () -> Unit,
 ) {
     val context=LocalContext.current
     var showLicenses by remember {mutableStateOf(false)}
@@ -81,6 +85,13 @@ fun SettingsScreen(
             SectionTitle("存储与隐私")
             SettingRow("清理阅读缓存", "源文件、书签和阅读记录不会删除", onClearCache)
             SettingRow("隐私说明", "所有书籍与阅读记录仅保存在本机") {}
+            SectionDivider()
+            SectionTitle("软件更新")
+            SettingSwitch("自动检查更新", "打开 App 时检查，每日最多一次；下载和安装由你确认", updateState.automatic, onAutomaticUpdates)
+            SettingRow("检查更新", "当前版本 V${com.moyue.reader.BuildConfig.VERSION_NAME} · ${updateState.message}", onCheckUpdates)
+            if (updateState.release != null) SettingRow(
+                if (updateState.phase == com.moyue.reader.feature.update.UpdatePhase.READY) "安装更新" else "下载更新",
+                "V${updateState.release.versionName}", onOpenUpdate)
             SectionDivider()
             SectionTitle("关于")
             SettingRow("墨阅", "本地优先 · 无账号 · 无广告") {}

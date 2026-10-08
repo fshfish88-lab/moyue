@@ -22,7 +22,7 @@ import kotlinx.coroutines.launch
 
 @Composable
 fun ChapterSheet(chapters: List<ChapterEntity>, currentIndex: Int, onSelect: (Int) -> Unit, onDismiss: () -> Unit,
-    catalogMessage:String?=null, refreshing:Boolean=false,onRefresh:(()->Unit)?=null) {
+    catalogMessage:String?=null, refreshing:Boolean=false,onRefresh:(()->Unit)?=null,onSource:(()->Unit)?=null,onDiagnostic:(()->Unit)?=null) {
     val current = currentIndex.coerceIn(0, chapters.lastIndex.coerceAtLeast(0))
     var target by remember(chapters.size) { mutableFloatStateOf(current.toFloat()) }
     var jump by remember { mutableStateOf("") }
@@ -40,6 +40,10 @@ fun ChapterSheet(chapters: List<ChapterEntity>, currentIndex: Int, onSelect: (In
                 Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween) {
                     TextButton(onClick={target=current.toFloat();scope.launch {list.scrollToItem(current)}}) {Text("定位当前章")}
                     if(onRefresh!=null)TextButton(onClick=onRefresh,enabled=!refreshing) {Text(if(refreshing)"正在刷新目录…" else "刷新目录")}
+                }
+                if(onSource!=null || onDiagnostic!=null)Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.End) {
+                    if(onSource!=null)TextButton(onClick=onSource,enabled=!refreshing) {Text("目录来源")}
+                    if(onDiagnostic!=null)TextButton(onClick=onDiagnostic,enabled=!refreshing) {Text("导出诊断")}
                 }
                 Text("拖动快速定位第 ${target.toInt()+1} 章",style=MaterialTheme.typography.labelMedium,color=MaterialTheme.colorScheme.onSurfaceVariant)
                 if(chapters.size>1)Slider(value=target.coerceIn(0f,chapters.lastIndex.toFloat()),onValueChange={target=it},

@@ -36,7 +36,7 @@ class ReadabilityExtractor {
             ?: cleaned.substringAfter("<body", cleaned).substringAfter('>', cleaned).substringBeforeLast("</body>", cleaned)
         val text = htmlToText(candidate)
         if (text.count { !it.isWhitespace() } < 20) throw NoReadableContentException()
-        val title = heading(cleaned).ifBlank {
+        val title = heading(html,base.toString()).ifBlank {
             documentTitle(html).substringBefore("_").substringBefore(" · ").substringBefore(" - ").ifBlank { "网页小说" }
         }
         return ReadablePage(
@@ -78,9 +78,19 @@ class ReadabilityExtractor {
         return bodies.sortedBy(Body::start).map(Body::content)
     }
 
-    private fun heading(html: String): String =
-        Regex("(?is)<h[1-3]\\b[^>]*>(.*?)</h[1-3]>").find(html)?.groupValues?.get(1)
-            ?.let(::htmlToText).orEmpty().lineSequence().firstOrNull().orEmpty()
+    private fun heading(html: String,source: String): String {
+        // A product/article header contains the real title; remove only site navigation.
+        val doc=org.jsoup.Jsoup.parse(html)
+        doc.select("nav,footer,aside,.sidebar,.header,.logo,.header_logo,.header-logo,#header,.recommend,.comments").remove()
+        val headings=doc.select("h1,h2,h3").filter {element->
+            element.select("a[href]").none {WebHtml.resolve(source,it.attr("href"))!=source.substringBefore('#')}
+        }
+        headings.firstOrNull {WebCatalogExtractor().isChapterTitle(it.text())}?.let {return it.text()}
+        doc.select("main h1,article h1,.product-title,.book-title,.entry-title,.bookinfo h1,#info h1").firstOrNull {it in headings || it.select("a[href]").isEmpty()}?.let {return it.text()}
+        headings.firstOrNull {it.tagName()=="h1"}?.let {return it.text()}
+        if(doc.title().isBlank())headings.firstOrNull()?.let {return it.text()}
+        return ""
+    }
 
     private fun documentTitle(html: String): String =
         Regex("(?is)<title\\b[^>]*>(.*?)</title>").find(html)?.groupValues?.get(1)

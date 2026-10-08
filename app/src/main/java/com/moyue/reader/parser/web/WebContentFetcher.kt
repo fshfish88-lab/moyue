@@ -9,26 +9,36 @@ import java.net.URI
 import java.net.URL
 import java.nio.charset.Charset
 
-data class FetchedWebPage(val finalUrl: String, val html: String)
+data class FetchedWebPage(val finalUrl: String, val html: String, val transport: String = "http", val statusCode: Int = 200)
 
 class WebContentFetcher(
     private val connectTimeoutMs: Int = 10_000,
     private val readTimeoutMs: Int = 15_000,
     private val maxBodyBytes: Int = 5 * 1024 * 1024,
     private val openConnection:(String)->HttpURLConnection = {URL(it).openConnection() as HttpURLConnection},
-) {
-    suspend fun fetch(url: String): FetchedWebPage = withContext(Dispatchers.IO) {
+    private val requestHeaders: (String) -> Map<String, String> = { emptyMap() },
+) : WebPageSource {
+    override suspend fun fetch(url: String): FetchedWebPage = withContext(Dispatchers.IO) {
         validate(url)
-        val connection = openConnection(url)
-        connection.instanceFollowRedirects = true
+        var target=url
+        repeat(9) { redirect ->
+        val connection = openConnection(target)
+        connection.instanceFollowRedirects = false
         connection.connectTimeout = connectTimeoutMs
         connection.readTimeout = readTimeoutMs
         connection.setRequestProperty("User-Agent", "Moyue/1.0 Android Reader")
         connection.setRequestProperty("Accept", "text/html,application/xhtml+xml")
+        requestHeaders(target).forEach { (name, value) -> connection.setRequestProperty(name, value) }
         try {
             val status = connection.responseCode
+            if(status in setOf(301,302,303,307,308)) {
+                if(redirect==8)throw IOException("网页重定向次数过多")
+                val location=connection.getHeaderField("Location") ?: throw IOException("网页重定向缺少地址")
+                target=URI(target).resolve(location).toString().also(::validate)
+                return@repeat
+            }
             if (status !in 200..299) throw IOException("网页请求失败（HTTP $status）")
-            val finalUrl = connection.url.toString().also(::validate)
+            val finalUrl = target.also(::validate)
             val type = connection.contentType.orEmpty()
             if (!type.contains("text/html", true) && !type.contains("application/xhtml", true)) {
                 throw IOException("该地址不是网页内容")
@@ -44,10 +54,12 @@ class WebContentFetcher(
                 }
                 output.toByteArray()
             }
-            FetchedWebPage(finalUrl, WebHtmlDecoder.decode(bytes,type))
+            return@withContext FetchedWebPage(finalUrl, WebHtmlDecoder.decode(bytes,type), statusCode = status)
         } finally {
             connection.disconnect()
         }
+        }
+        throw IOException("网页重定向失败")
     }
 
     private fun validate(value: String) {

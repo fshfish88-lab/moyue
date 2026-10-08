@@ -7,6 +7,11 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.compose.setContent
 
 class MainActivity : ComponentActivity() {
+    override fun onStart() {
+        super.onStart()
+        (application as MoyueApplication).container.updates.foreground()
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()

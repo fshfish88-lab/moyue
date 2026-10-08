@@ -21,6 +21,7 @@ class MoyueApplication : Application() {
 }
 
 class MoyueContainer(val applicationContext: Application) {
+    val updates = com.moyue.reader.feature.update.AppUpdateManager(applicationContext)
     val database = MoyueDatabase.get(applicationContext)
     val storage = BookStorage(applicationContext.filesDir, applicationContext.cacheDir).also(BookStorage::ensureRoots)
     val preferences = ReaderPreferencesRepository(applicationContext)
@@ -28,7 +29,8 @@ class MoyueContainer(val applicationContext: Application) {
         storage,
         RoomAtomicImportStore(database, storage, GeneratedCoverFileWriter()),
     )
-    val importService = ImportService(applicationContext, importCoordinator)
+    val webPages = com.moyue.reader.feature.importbook.BrowserWebPageSource(applicationContext)
+    val importService = ImportService(applicationContext, importCoordinator, webPages)
     val markdown = com.moyue.reader.feature.markdown.MarkdownRepository(applicationContext, database, storage)
     val visuals = com.moyue.reader.feature.image.VisualRepository(database, storage)
     val documents = com.moyue.reader.feature.pdf.PdfRepository(database, storage)

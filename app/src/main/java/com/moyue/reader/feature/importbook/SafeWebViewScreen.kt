@@ -1,6 +1,8 @@
 package com.moyue.reader.feature.importbook
 
 import android.annotation.SuppressLint
+import kotlinx.coroutines.launch
+import androidx.compose.ui.unit.dp
 import android.net.http.SslError
 import android.webkit.SslErrorHandler
 import android.webkit.WebView
@@ -31,7 +33,11 @@ import androidx.compose.ui.viewinterop.AndroidView
 @SuppressLint("SetJavaScriptEnabled")
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SafeWebViewScreen(initialUrl: String, onBack: () -> Unit, onPureMode: (String) -> Unit) {
+fun SafeWebViewScreen(initialUrl: String, onBack: () -> Unit, onPureMode: (com.moyue.reader.parser.web.FetchedWebPage) -> Unit) {
+    val scope=androidx.compose.runtime.rememberCoroutineScope()
+    var capturing by remember {mutableStateOf(false)}
+    var ready by remember {mutableStateOf(false)}
+    var browserError by remember {mutableStateOf<String?>(null)}
     var currentUrl by remember(initialUrl) { mutableStateOf(initialUrl) }
     var webView: WebView? by remember { mutableStateOf(null) }
     Scaffold(
@@ -41,10 +47,21 @@ fun SafeWebViewScreen(initialUrl: String, onBack: () -> Unit, onPureMode: (Strin
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
                 title = { Text("网页浏览") },
                 navigationIcon = { IconButton(onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回") } },
-                actions = { Button(onClick = { onPureMode(currentUrl) }) { Text("纯净模式") } },
+                actions = { Button(enabled=ready && !capturing,onClick = {
+                    val view=webView ?: return@Button
+                    capturing=true;browserError=null
+                    scope.launch {
+                        try {onPureMode(captureRenderedPage(view))}
+                        catch(e:kotlinx.coroutines.CancellationException){throw e}
+                        catch(e:Exception){browserError=e.message ?: "网页解析失败"}
+                        finally {capturing=false}
+                    }
+                }) { Text(if(capturing)"正在读取页面…" else "纯净模式") } },
             )
         },
     ) { padding ->
+        androidx.compose.foundation.layout.Column(Modifier.fillMaxSize().padding(padding)) {
+        browserError?.let {Text(it,color=MaterialTheme.colorScheme.error,modifier=Modifier.padding(12.dp))}
         AndroidView(
             factory = { context ->
                 WebView(context).apply {
@@ -61,21 +78,31 @@ fun SafeWebViewScreen(initialUrl: String, onBack: () -> Unit, onPureMode: (Strin
                             return scheme != "http" && scheme != "https"
                         }
 
+                        override fun onPageStarted(view:WebView?,url:String?,favicon:android.graphics.Bitmap?) {
+                            ready=false;browserError=null
+                        }
+                        override fun onReceivedHttpError(view:WebView?,request:WebResourceRequest?,response:android.webkit.WebResourceResponse?) {
+                            if(request?.isForMainFrame==true){browserError="网页请求失败（HTTP ${response?.statusCode}）";ready=false}
+                        }
+                        override fun onReceivedError(view:WebView?,request:WebResourceRequest?,error:android.webkit.WebResourceError?) {
+                            if(request?.isForMainFrame==true){browserError="网页无法访问，请稍后重试";ready=false}
+                        }
                         override fun onPageFinished(view: WebView?, url: String?) {
-                            url?.let { currentUrl = it }
+                            url?.let { currentUrl = it;ready=it.startsWith("http") && browserError==null }
                         }
 
                         override fun onReceivedSslError(view: WebView?, handler: SslErrorHandler, error: SslError?) {
-                            handler.cancel()
+                            handler.cancel();browserError="网页证书校验失败";ready=false
                         }
                     }
                     loadUrl(initialUrl)
                     webView = this
                 }
             },
-            modifier = Modifier.fillMaxSize().padding(padding),
+            modifier = Modifier.fillMaxSize(),
             update = {},
         )
+        }
     }
     DisposableEffect(Unit) { onDispose { webView?.destroy() } }
 }

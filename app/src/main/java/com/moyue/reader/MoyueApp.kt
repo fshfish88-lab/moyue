@@ -60,6 +60,7 @@ private sealed interface AppScreen {
 fun MoyueApp(container: MoyueContainer, sharedUrl: String? = null) {
     val books by container.database.bookDao().observeAll().collectAsState(initial = emptyList())
     val preferences by container.preferences.preferences.collectAsState(initial = ReaderPreferences())
+    val updateState by container.updates.state.collectAsState()
     val scope = rememberCoroutineScope()
     val snackbar = remember { SnackbarHostState() }
     var screen: AppScreen by remember { mutableStateOf(AppScreen.Shelf) }
@@ -130,6 +131,10 @@ fun MoyueApp(container: MoyueContainer, sharedUrl: String? = null) {
                     }
                 },
                 onBookshelf = { screen = AppScreen.Shelf },
+                updateState = updateState,
+                onAutomaticUpdates = container.updates::setAutomatic,
+                onCheckUpdates = container.updates::checkManually,
+                onOpenUpdate = container.updates::showPrompt,
             )
             is AppScreen.Reader -> ReaderDestination(
                 destination,
@@ -159,14 +164,14 @@ fun MoyueApp(container: MoyueContainer, sharedUrl: String? = null) {
             is AppScreen.Browser -> SafeWebViewScreen(
                 initialUrl = destination.url,
                 onBack = { screen = AppScreen.Shelf; showImport = true },
-                onPureMode = { url ->
+                onPureMode = { page ->
                     screen = AppScreen.Shelf
-                    pendingWebUrl = url
+                    pendingWebUrl = page.finalUrl
                     showImport = true
                     webBusy = true
                     webError = null
                     scope.launch {
-                        runCatching { container.importService.previewWeb(url) }
+                        runCatching { container.importService.previewWeb(page) }
                             .onSuccess { preview ->
                                 showImport = false
                                 val result = container.importService.importWeb(preview) { importState = it }
@@ -184,13 +189,16 @@ fun MoyueApp(container: MoyueContainer, sharedUrl: String? = null) {
         }
         }
         SnackbarHost(snackbar)
+        if ((screen == AppScreen.Shelf || screen == AppScreen.Settings) && !showImport && importState == null) {
+            com.moyue.reader.feature.update.AppUpdateDialogs(container.updates)
+        }
         if (showImport) {
             ImportSheet(
                 initialUrl = pendingWebUrl,
                 preview = webPreview,
                 webBusy = webBusy,
                 webError = webError,
-                onPickFile = { filePicker.launch(arrayOf("text/plain", "application/epub+zip", "text/markdown", "text/x-markdown", "application/pdf", "image/jpeg", "image/png", "image/webp", "application/zip", "application/x-cbz", "application/vnd.comicbook+zip")) },
+                onPickFile = { filePicker.launch(arrayOf("*/*")) },
                 onPickAnyFile = { filePicker.launch(arrayOf("*/*")) },
                 onNewMarkdown = {
                     showImport = false
@@ -254,7 +262,7 @@ private fun ReaderDestination(
     val viewModel = remember(store) {
         val factory = object : androidx.lifecycle.ViewModelProvider.Factory {
             override fun <T : androidx.lifecycle.ViewModel> create(modelClass: Class<T>): T =
-                requireNotNull(modelClass.cast(ReaderViewModel(ReaderRepository(RoomReaderDataSource(container.database, container.storage)))))
+                requireNotNull(modelClass.cast(ReaderViewModel(ReaderRepository(RoomReaderDataSource(container.database, container.storage, webFetcher=container.webPages)))))
         }
         androidx.lifecycle.ViewModelProvider(store, factory)[ReaderViewModel::class.java]
     }
@@ -270,6 +278,41 @@ private fun ReaderDestination(
     BackHandler {
         scope.launch { viewModel.flushProgressOnBack(); onBack() }
     }
+    var showCatalogSource by remember {mutableStateOf(false)}
+    var catalogSource by remember {mutableStateOf("")}
+    var catalogSourceError by remember {mutableStateOf<String?>(null)}
+    val exportDiagnostic=rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/plain")) {uri->
+        if(uri!=null)scope.launch {
+            withContext(Dispatchers.IO) {
+                val file=container.storage.webCache(destination.bookId).resolve("catalog-diagnostic.txt")
+                container.applicationContext.contentResolver.openOutputStream(uri)?.use {output->
+                    output.write((if(file.isFile)file.readText() else "还没有抓取诊断，请先刷新目录。\n").toByteArray(Charsets.UTF_8))
+                }
+            }
+        }
+    }
+    if(showCatalogSource)androidx.compose.material3.AlertDialog(
+        onDismissRequest={showCatalogSource=false},
+        title={androidx.compose.material3.Text("目录来源")},
+        text={androidx.compose.foundation.layout.Column {
+            androidx.compose.material3.Text("填写完整目录网址。留空则重新自动识别。")
+            androidx.compose.material3.OutlinedTextField(catalogSource,{catalogSource=it;catalogSourceError=null},singleLine=true,label={androidx.compose.material3.Text("完整目录网址")})
+            catalogSourceError?.let {androidx.compose.material3.Text(it,color=MaterialTheme.colorScheme.error)}
+        }},
+        confirmButton={androidx.compose.material3.TextButton(onClick={
+            val value=catalogSource.trim()
+            val valid=value.isEmpty() || runCatching {java.net.URI(value).let {it.scheme?.lowercase() in setOf("http","https") && !it.host.isNullOrBlank() && it.userInfo==null}}.getOrDefault(false)
+            if(!valid)catalogSourceError="请填写有效的HTTP/HTTPS网址"
+            else scope.launch {
+                withContext(Dispatchers.IO) {
+                    val file=container.storage.bookDirectory(destination.bookId).resolve("web-catalog.url")
+                    if(value.isEmpty())file.delete() else {file.parentFile?.mkdirs();file.writeText(value.substringBefore('#'))}
+                }
+                showCatalogSource=false;viewModel.refreshCatalog()
+            }
+        }) {androidx.compose.material3.Text("保存并刷新")}},
+        dismissButton={androidx.compose.material3.TextButton(onClick={showCatalogSource=false}) {androidx.compose.material3.Text("取消")}},
+    )
     val current = state
     if (current == null) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -293,6 +336,13 @@ private fun ReaderDestination(
             onScrollPosition = viewModel::updateScrollPosition,
             onPrefetch = { scope.launch { viewModel.prefetchFollowing() } },
             onRefreshCatalog = { scope.launch { viewModel.refreshCatalog() } },
+            onCatalogSource = {scope.launch {
+                catalogSource=withContext(Dispatchers.IO) {
+                    val file=container.storage.bookDirectory(destination.bookId).resolve("web-catalog.url")
+                    if(file.isFile)file.readText() else ""
+                };catalogSourceError=null;showCatalogSource=true
+            }},
+            onCatalogDiagnostic = {exportDiagnostic.launch("墨阅-目录诊断-${destination.bookId}.txt")},
             onPreferences = { viewModel.updatePreferences(it); onPreferences(it) },
         )
     }
