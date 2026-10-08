@@ -77,6 +77,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
@@ -119,22 +120,36 @@ fun ReaderScreen(
     var showChapters by remember { mutableStateOf(false) }
     var showSettings by remember { mutableStateOf(false) }
     val preferences = state.preferences
+    // Toolbar visibility and catalog state do not affect text shaping or scroll contents.
+    val content = remember(state.chapter, state.position, preferences, state.canGoPrevious,
+        state.canGoNext, state.error, state.scrollWindow, state.prefetching) {
+        ReaderContentState(state.chapter, state.position, preferences, state.canGoPrevious,
+            state.canGoNext, state.error, state.scrollWindow, state.prefetching)
+    }
+    val contentAnnotations = remember(annotations) { annotations }
+    val latestSelection by rememberUpdatedState(onSelection)
+    val contentSelection = remember {
+        { chapter: com.moyue.reader.core.model.ReaderChapter, start: ReaderPosition, end: ReaderPosition, type: String ->
+            latestSelection(chapter, start, end, type)
+        }
+    }
+    val toggleControls by rememberUpdatedState(onToggleControls)
     ReaderDisplayEffects(preferences)
     MoyueReaderTheme(preferences) {
         Box(
             Modifier
                 .fillMaxSize().background(MaterialTheme.colorScheme.background)
-                .then(if(preferences.pageMode==PageMode.SCROLL) Modifier.pointerInput(state.controlsVisible) {
+                .then(if(preferences.pageMode==PageMode.SCROLL) Modifier.pointerInput(Unit) {
                     detectTapGestures { offset ->
-                        if (offset.x in size.width * .25f..size.width * .75f) onToggleControls()
+                        if (offset.x in size.width * .25f..size.width * .75f) toggleControls()
                     }
                 } else Modifier),
         ) {
             key(state.scrollSession, if (preferences.pageMode == PageMode.SCROLL) 0L else state.chapter.id, preferences.pageMode) {
             if (preferences.pageMode == PageMode.SCROLL) {
-                ScrollingChapter(state, onScrollPosition, onPrefetch, onNext, annotations, onSelection)
+                ScrollingChapter(content, onScrollPosition, onPrefetch, onNext, contentAnnotations, contentSelection)
             } else {
-                PagedChapter(state, onPosition, onPrevious, onNext, onToggleControls, annotations, onSelection)
+                PagedChapter(content, onPosition, onPrevious, onNext, onToggleControls, contentAnnotations, contentSelection)
             }
 
             }
@@ -212,8 +227,19 @@ private data class ScrollItem(val chapter: com.moyue.reader.core.model.ReaderCha
     val key: String get() = "${chapter.id}:$block"
 }
 
+private data class ReaderContentState(
+    val chapter: com.moyue.reader.core.model.ReaderChapter,
+    val position: ReaderPosition,
+    val preferences: ReaderPreferences,
+    val canGoPrevious: Boolean,
+    val canGoNext: Boolean,
+    val error: String?,
+    val scrollWindow: List<com.moyue.reader.core.model.ReaderChapter>,
+    val prefetching: Boolean,
+)
+
 @Composable
-private fun ScrollingChapter(state: ReaderState, onPosition: (Long, ReaderPosition, Float) -> Unit, onPrefetch: () -> Unit, onNext: () -> Unit,
+private fun ScrollingChapter(state: ReaderContentState, onPosition: (Long, ReaderPosition, Float) -> Unit, onPrefetch: () -> Unit, onNext: () -> Unit,
     annotations: List<com.moyue.reader.core.database.AnnotationEntity>, onSelection: (com.moyue.reader.core.model.ReaderChapter, ReaderPosition, ReaderPosition, String) -> Unit) {
     val window = state.scrollWindow.ifEmpty { listOf(state.chapter) }
     val entries = remember(window) { window.flatMap { chapter -> listOf(ScrollItem(chapter, -1)) + chapter.blocks.indices.map { ScrollItem(chapter, it) } } }
@@ -304,7 +330,7 @@ private fun ScrollingChapter(state: ReaderState, onPosition: (Long, ReaderPositi
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 @android.annotation.SuppressLint("InlinedApi")
-private fun PagedChapter(state: ReaderState, onPosition: (ReaderPosition, Float) -> Unit, onPrevious:()->Unit,onNext: () -> Unit,onToggleControls:()->Unit,
+private fun PagedChapter(state: ReaderContentState, onPosition: (ReaderPosition, Float) -> Unit, onPrevious:()->Unit,onNext: () -> Unit,onToggleControls:()->Unit,
     annotations: List<com.moyue.reader.core.database.AnnotationEntity>, onSelection: (com.moyue.reader.core.model.ReaderChapter, ReaderPosition, ReaderPosition, String) -> Unit) {
     val density = LocalDensity.current
     val scope = rememberCoroutineScope()

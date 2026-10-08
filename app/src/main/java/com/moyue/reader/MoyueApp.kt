@@ -339,12 +339,15 @@ private fun ReaderDestination(
             }
         }
     } else {
-        ReaderScreen(
-            state = current,
-            annotations = annotations + listOfNotNull(current.jumpHighlight?.let { raw ->
+        val readerAnnotations = remember(annotations, current.jumpHighlight, current.chapter, current.bookId) {
+            annotations + listOfNotNull(current.jumpHighlight?.let { raw ->
                 val a=org.json.JSONObject(raw)
                 com.moyue.reader.core.database.AnnotationEntity(id=-1,bookId=current.bookId,type="HIGHLIGHT",anchorJson=raw,selectedText=a.optString("quote"),note="",color="yellow",location="",sourceHash=com.moyue.reader.feature.annotations.textHash(com.moyue.reader.feature.annotations.blockText(current.chapter.blocks[a.optInt("blockIndex")])),createdAt=0,updatedAt=0)
-            }),
+            })
+        }
+        ReaderScreen(
+            state = current,
+            annotations = readerAnnotations,
             onSelection = { chapter, start, end, type -> annotationDraft = com.moyue.reader.feature.annotations.textDraft(current.bookId, chapter, start, end, type) },
             onAnnotations = { showAnnotations = true },
             onBookmark = { annotationDraft = com.moyue.reader.feature.annotations.textDraft(current.bookId, current.chapter, current.position, current.position, "BOOKMARK") },

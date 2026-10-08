@@ -15,9 +15,9 @@ android {
         applicationId = "com.moyue.reader"
         minSdk = 26
         targetSdk = 36
-        versionCode = 24
-        // V1.6.1: highlight replacement, glyph-only paint and responsive reader settings.
-        versionName = "1.6.1"
+        versionCode = 25
+        // V1.6.2: isolate reader content from toolbar visibility.
+        versionName = "1.6.2"
         testInstrumentationRunner = "com.moyue.reader.feature.annotations.V160Instrumentation"
     }
 
