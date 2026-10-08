@@ -20,4 +20,6 @@ $env:JAVA_HOME = 'D:\Android Studio\Jdk\jdk-17.0.20.1+1'
 .\scripts\publish-release.ps1 -Version x.y.z -DeliveryDirectory '成品目录的绝对路径' -NotesPath '更新说明的绝对路径'
 ```
 
-脚本读取实际 APK 的包名、版本、最低系统和哈希，生成 update.json 与 SHA256.txt，并创建或更新草稿。脚本要求原发布证书。附件远端哈希不一致时会停止，保留草稿。完成验收后使用同一命令加 `-Publish` 发布为 Latest；发布完成后检查公开更新信息和实际下载。已发布版本不可覆盖，应增加版本号重新发布。保持仓库公开，否则手机端匿名查询不可用。
+可先加 `-PrepareOnly` 从实际 APK 生成并核对本地更新信息，确认 versionCode 和 minSdk 后再上传。
+
+脚本读取实际 APK 的包名、版本、最低系统和哈希，生成 update.json 与 SHA256.txt，并创建或更新草稿。脚本要求原发布证书。附件远端哈希不一致时会停止，保留草稿。完成验收后使用同一命令加 `-Publish` 发布为 Latest；发布完成后检查公开更新信息和实际下载。已发布 APK 不覆盖，修改应用需增加版本号重新发布；如仅修正更新信息，应先核对实际 APK 并单独修复元数据。保持仓库公开，否则手机端匿名查询不可用。

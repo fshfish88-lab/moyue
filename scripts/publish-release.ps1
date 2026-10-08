@@ -3,7 +3,8 @@ param(
     [Parameter(Mandatory=$true)][string]$DeliveryDirectory,
     [Parameter(Mandatory=$true)][string]$NotesPath,
     [string]$BuildTools = 'D:\Android Studio\Sdk\build-tools\36.0.0',
-    [switch]$Publish
+    [switch]$Publish,
+    [switch]$PrepareOnly
 )
 $ErrorActionPreference = 'Stop'
 if ($Version -notmatch '^\d+\.\d+\.\d+$') { throw 'Use a stable x.y.z version.' }
@@ -15,12 +16,16 @@ foreach ($file in @($apk,$source)) { if (!(Test-Path -LiteralPath $file -PathTyp
 $metadata = @(& (Join-Path $BuildTools 'aapt2.exe') dump badging $apk)
 if ($LASTEXITCODE -ne 0) { throw 'APK metadata failed.' }
 $packageLine = $metadata | Where-Object { $_ -like 'package:*' } | Select-Object -First 1
-if ($packageLine -notmatch "name='com.moyue.reader' versionCode='(\d+)' versionName='([^']+)'") { throw 'Wrong APK package.' }
-$versionCode = [long]$Matches[1]
-if ($Matches[2] -ne $Version) { throw 'APK version differs from requested release.' }
-$sdkLine = $metadata | Where-Object { $_ -like 'sdkVersion:*' } | Select-Object -First 1
-if ($sdkLine -notmatch "sdkVersion:'(\d+)'") { throw 'Missing min SDK.' }
-$minSdk = [int]$Matches[1]
+$packageMatch = [regex]::Match([string]$packageLine,"name='com.moyue.reader' versionCode='(\d+)' versionName='([^']+)'")
+if (!$packageMatch.Success) { throw 'Wrong APK package.' }
+$versionCode = [long]$packageMatch.Groups[1].Value
+if ($packageMatch.Groups[2].Value -ne $Version) { throw 'APK version differs from requested release.' }
+$sdkLine = $metadata | Where-Object { $_ -match '^(?:minSdkVersion|sdkVersion):' } | Select-Object -First 1
+if ($null -eq $sdkLine) { throw 'Missing min SDK line.' }
+$sdkMatch = [regex]::Match([string]$sdkLine,"(?:minSdkVersion|sdkVersion):'(\d+)'")
+if (!$sdkMatch.Success) { throw 'Missing min SDK.' }
+$minSdk = [int]$sdkMatch.Groups[1].Value
+if ($versionCode -le 0 -or $minSdk -lt 26 -or (Get-Item -LiteralPath $apk).Length -gt 157286400) { throw 'Metadata violates the Android updater policy.' }
 $signature = @(& (Join-Path $BuildTools 'apksigner.bat') verify --print-certs $apk)
 if ($LASTEXITCODE -ne 0 -or !(($signature -join "`n") -match 'certificate SHA-256 digest: 16f17d6aab70b30f11acb6ff48dbb00f44cfbe1844ef14c2d045ef3d9b25b72a')) { throw 'Wrong release signing certificate.' }
 & (Join-Path $BuildTools 'zipalign.exe') -c 4 $apk
@@ -37,6 +42,7 @@ $manifest = [ordered]@{
 $shaPath = Join-Path $delivery 'SHA256.txt'
 $hashes = foreach ($file in @($apk,$source,$updatePath)) { (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash+'  '+[IO.Path]::GetFileName($file) }
 [IO.File]::WriteAllText($shaPath,($hashes -join "`n")+"`n",[Text.UTF8Encoding]::new($false))
+if ($PrepareOnly) { Write-Output ($manifest | ConvertTo-Json); return }
 $repo = 'fshfish88-lab/moyue'
 $root = Split-Path -Parent $PSScriptRoot
 $commit = git -c "safe.directory=$($root.Replace('\','/'))" -C $root rev-parse HEAD
