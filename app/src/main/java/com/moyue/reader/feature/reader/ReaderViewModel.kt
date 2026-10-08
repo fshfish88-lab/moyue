@@ -34,6 +34,7 @@ data class ReaderState(
     val prefetching: Boolean = false,
     val catalogMessage:String?=null,
     val catalogRefreshing:Boolean=false,
+    val jumpHighlight: String? = null,
 )
 
 class ReaderViewModel(private val repository: ReaderRepository) : ViewModel() {
@@ -135,6 +136,42 @@ class ReaderViewModel(private val repository: ReaderRepository) : ViewModel() {
         navigate { moveTo(index - 1) }
     }
     suspend fun goTo(index: Int) = navigate { moveTo(index) }
+    suspend fun jumpToAnchor(raw: String) {
+        try {
+            val anchor = org.json.JSONObject(raw)
+            val current = mutableState.value ?: return
+            val index = current.chapters.indexOfFirst { it.id == anchor.optLong("chapterId") }
+            require(index >= 0) { "原文章节已变化，摘录仍保留" }
+            goTo(index)
+            val loaded = mutableState.value ?: return
+            val block = anchor.optInt("blockIndex")
+            var position = safeReaderPosition(loaded.chapter.blocks, block, anchor.optInt("charOffset"))
+            val quote = anchor.optString("quote")
+            if (quote.isNotBlank()) {
+                val text = loaded.chapter.blocks.getOrNull(position.blockIndex)?.let { com.moyue.reader.feature.annotations.blockText(it) }.orEmpty()
+                val exact = text.regionMatches(position.charOffset, quote, 0, quote.length, ignoreCase = anchor.optBoolean("search"))
+                val end = safeReaderPosition(loaded.chapter.blocks, anchor.optInt("endBlock", block), anchor.optInt("endOffset", position.charOffset + quote.length))
+                val multilineExact = quote.contains('\n') && runCatching { com.moyue.reader.feature.annotations.sourceSelection(loaded.chapter.blocks, position, end) == quote }.getOrDefault(false)
+                if (!exact && !multilineExact) {
+                    val candidates = loaded.chapter.blocks.flatMapIndexed { i, value ->
+                        val valueText = com.moyue.reader.feature.annotations.blockText(value)
+                        val first = valueText.indexOf(quote)
+                        if (first < 0) emptyList() else {
+                            val second = valueText.indexOf(quote, first + 1)
+                            if (second >= 0) listOf(ReaderPosition(i, first), ReaderPosition(i, second)) else listOf(ReaderPosition(i, first))
+                        }
+                    }
+                    require(candidates.size == 1) { "原文位置已变化，无法唯一定位；摘录仍保留" }
+                    position = candidates.single()
+                }
+            }
+            val highlight = if (quote.isBlank() || quote.contains('\n')) null else anchor.put("blockIndex", position.blockIndex).put("charOffset", position.charOffset)
+                .put("endBlock", position.blockIndex).put("endOffset", position.charOffset + quote.length).toString()
+            mutableState.value = loaded.copy(position = position, scrollWindow = listOf(loaded.chapter), scrollSession = loaded.scrollSession + 1, controlsVisible = false, jumpHighlight = highlight)
+        } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+        catch (e: Exception) { mutableState.value = mutableState.value?.copy(error = e.message ?: "原文定位失败", controlsVisible = true) }
+    }
+    fun clearJumpHighlight() { mutableState.value = mutableState.value?.copy(jumpHighlight = null) }
     suspend fun refreshCatalog() {
         if(!navigation.tryLock())return
         val before=mutableState.value

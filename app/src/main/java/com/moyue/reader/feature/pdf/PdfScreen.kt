@@ -56,7 +56,7 @@ import java.util.UUID
 @SuppressLint("SetJavaScriptEnabled")
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun PdfScreen(bookId: Long, container: MoyueContainer, preferences: ReaderPreferences, onPreferences: (ReaderPreferences)->Unit, onBack: ()->Unit) {
+fun PdfScreen(bookId: Long, container: MoyueContainer, preferences: ReaderPreferences, onPreferences: (ReaderPreferences)->Unit, onBack: ()->Unit, initialAnchor: String? = null) {
     val context=LocalContext.current
     val window=LocalActivity.current?.window
     val view=LocalView.current
@@ -88,6 +88,9 @@ fun PdfScreen(bookId: Long, container: MoyueContainer, preferences: ReaderPrefer
     var backPending by remember { mutableStateOf(false) }
     val session=remember(bookId) { UUID.randomUUID().toString() }
     val snackbar=remember { SnackbarHostState() }
+    var annotationDraft by remember { mutableStateOf<com.moyue.reader.feature.annotations.AnnotationDraft?>(null) }
+    var showAnnotations by remember { mutableStateOf(false) }
+    val annotations by container.database.annotationDao().forBook(bookId).collectAsState(initial = emptyList())
     val savedBookmarks by container.database.documentDao().bookmarks(bookId).collectAsState(initial=emptyList())
     val lifecycle=LocalLifecycleOwner.current.lifecycle
     ReaderDisplayEffects(preferences)
@@ -160,6 +163,12 @@ fun PdfScreen(bookId: Long, container: MoyueContainer, preferences: ReaderPrefer
         val type=data.optString("type")
         if(type!="ready" && data.optString("session")!=session) return@handler
         when(type) {
+            "annotationMissing" -> notify("旧书签位置无法解析，记录仍保留")
+            "annotation" -> {
+                val anchor = data.optJSONObject("anchor") ?: return@handler
+                annotationDraft = com.moyue.reader.feature.annotations.AnnotationDraft(bookId, anchor.toString(), data.optString("text"), "第 ${anchor.optInt("pageIndex") + 1} 页", document?.hash.orEmpty(), data.optString("annotationType", "HIGHLIGHT"))
+            }
+            "indexedPage" -> container.documentWrites.launch { container.searchIndexer.pdfPage(bookId, data.optInt("page"), data.optString("text")) }
             "ready" -> document?.let { doc ->
                 js("open",JSONObject().put("session",session).put("position",if(doc.hasPosition) JSONObject(PdfRepository.encode(doc.position)) else JSONObject())
                     .put("mode",preferences.pdfPageMode).put("fit",preferences.pdfFit).toString())
@@ -193,6 +202,8 @@ fun PdfScreen(bookId: Long, container: MoyueContainer, preferences: ReaderPrefer
     }
     val currentMessage by rememberUpdatedState(messageHandler)
     val latestOnBack by rememberUpdatedState(onBack)
+    LaunchedEffect(opened, annotations) { if(opened) js("annotations", container.annotations.json(annotations)) }
+    LaunchedEffect(opened, initialAnchor) { if(opened && initialAnchor != null) js("jumpAnnotation", initialAnchor) }
     MoyueReaderTheme(preferences) {
         val background=MaterialTheme.colorScheme.background
         val color="#%06X".format(background.toArgb() and 0xffffff)
@@ -239,8 +250,8 @@ fun PdfScreen(bookId: Long, container: MoyueContainer, preferences: ReaderPrefer
               TopAppBar(modifier=Modifier.onSizeChanged {topChrome=it.height/density},title={Text(document?.book?.title ?: "PDF",maxLines=1)},navigationIcon={IconButton({back()}) { Icon(Icons.AutoMirrored.Filled.ArrowBack,"返回书架") }},actions={
                 IconButton({val show=!menu; closePanels(); menu=show}) { Icon(Icons.Default.MoreVert,"PDF 菜单") }
                 DropdownMenu(menu,{menu=false}) {
-                    DropdownMenuItem(text={Text("添加当前位置书签")},enabled=opened,onClick={menu=false; document?.let { doc -> scope.launch { container.documents.bookmark(doc,position); notify("书签已添加") } }})
-                    DropdownMenuItem(text={Text("我的书签")},onClick={showBookmarks()})
+                    DropdownMenuItem(text={Text("添加当前位置书签")},enabled=opened,onClick={menu=false; annotationDraft = com.moyue.reader.feature.annotations.AnnotationDraft(bookId, JSONObject().put("kind","PDF").put("pageIndex",position.pageIndex).put("position",JSONObject(PdfRepository.encode(position))).toString(), "", "第 ${position.pageIndex + 1} 页", type="BOOKMARK")})
+                    DropdownMenuItem(text={Text("本书标注")},onClick={menu=false; showAnnotations=true})
                     if(outlineCount>0) DropdownMenuItem(text={Text("文档大纲")},onClick={toggleSidebar(2)})
                     DropdownMenuItem(text={Text("阅读外观")},onClick={showAppearance()})
                 }
@@ -304,4 +315,5 @@ fun PdfScreen(bookId: Long, container: MoyueContainer, preferences: ReaderPrefer
             Spacer(Modifier.height(24.dp))
         }
     }
+    com.moyue.reader.feature.annotations.AnnotationTools(container, bookId, annotationDraft, { annotationDraft = it }, showAnnotations, { showAnnotations = it }, { a -> js("jumpAnnotation", a.anchorJson) })
 }

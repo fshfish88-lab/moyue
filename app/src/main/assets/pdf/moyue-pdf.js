@@ -2,6 +2,34 @@
 (() => {
   'use strict';
   let app, config, restoring = true, lastLocation, positionTimer;
+  let annotations=[], pendingAnnotation=null, annotationBar, indexedPages=new Set();
+  function drawAnnotations() {
+    document.querySelectorAll('.moyue-highlight-layer').forEach(n=>n.remove());
+    const colors={yellow:'#efc75266',green:'#6fcf9766',blue:'#6caff066',pink:'#f493b266'};
+    for(const item of annotations){
+      const a=item.anchor;if(a.kind!=='PDF'||!a.pageRects?.length)continue;
+      const page=app.pdfViewer.getPageView(a.pageIndex),node=page?.div;if(!node||!page.viewport)continue;
+      const layer=document.createElement('div');layer.className='moyue-highlight-layer';
+      Object.assign(layer.style,{position:'absolute',inset:'0',pointerEvents:'none',zIndex:'4'});
+      for(const rect of a.pageRects){
+        const r=[...page.viewport.convertToViewportPoint(rect[0],rect[1]),...page.viewport.convertToViewportPoint(rect[2],rect[3])],mark=document.createElement('div');
+        Object.assign(mark.style,{position:'absolute',left:Math.min(r[0],r[2])+'px',top:Math.min(r[1],r[3])+'px',width:Math.abs(r[2]-r[0])+'px',height:Math.abs(r[3]-r[1])+'px',background:colors[item.color]||colors.yellow});layer.append(mark);
+      }node.append(layer);
+    }
+  }
+  function selectionChanged() {
+    const s=window.getSelection();if(!annotationBar||!s?.rangeCount||s.isCollapsed){if(annotationBar)annotationBar.style.display='none';return;}
+    const r=s.getRangeAt(0),first=(r.startContainer.nodeType===1?r.startContainer:r.startContainer.parentElement)?.closest('.page'),last=(r.endContainer.nodeType===1?r.endContainer:r.endContainer.parentElement)?.closest('.page');
+    if(!first||first!==last||!s.toString().trim()||s.toString().length>32768){annotationBar.style.display='none';return;}
+    const index=Number(first.dataset.pageNumber)-1,p=app.pdfViewer.getPageView(index),bounds=first.getBoundingClientRect();
+    const rects=[...r.getClientRects()].filter(x=>x.width>0&&x.height>0).map(x=>{
+      const a=p.viewport.convertToPdfPoint(Math.max(0,x.left-bounds.left),Math.max(0,x.top-bounds.top));
+      const b=p.viewport.convertToPdfPoint(Math.min(bounds.width,x.right-bounds.left),Math.min(bounds.height,x.bottom-bounds.top));
+      return [Math.min(a[0],b[0]),Math.min(a[1],b[1]),Math.max(a[0],b[0]),Math.max(a[1],b[1])];
+    }).slice(0,512);
+    if(!rects.length)return;
+    pendingAnnotation={anchor:{kind:'PDF',pageIndex:index,pageRects:rects,quote:s.toString(),position:position()},text:s.toString()};annotationBar.style.display='flex';
+  }
   // AndroidView may initially measure WebView as wrap-content. Keep the fixed viewer shell tied
   // to the actual native viewport; reflowed Markdown does not need this layout adapter.
   const sizeHost = () => { if(innerHeight > 0) document.documentElement.style.height=innerHeight+'px'; };
@@ -28,6 +56,13 @@
   }
   function report() { if(!restoring && app?.pdfDocument) post('position', position()); }
   window.MoyuePdf = {
+    annotations(items){annotations=items;drawAnnotations();},
+    jumpAnnotation(a){
+      if(a.position?.invalidLegacy){post('annotationMissing');return;}
+      if(a.position)this.restore(a.position);else this.page(a.pageIndex+1);
+      if(a.quote && !a.pageRects?.length){this.find(a.quote);}
+      else if(a.pageRects?.length){const rect=a.pageRects[0];app.pdfViewer.scrollPageIntoView({pageNumber:a.pageIndex+1,destArray:[null,{name:'XYZ'},rect[0],rect[3],null]});}
+    },
     async open(value) {
       config = value;
       try {
@@ -91,6 +126,14 @@
     options.set('localeProperties',{lang:'zh-CN'});
     options.set('maxCanvasPixels',8388608);
     app.initializedPromise.then(() => {
+      annotationBar=document.createElement('div');
+      Object.assign(annotationBar.style,{position:'fixed',bottom:'84px',left:'50%',transform:'translateX(-50%)',zIndex:'100000',display:'none',background:'#fff',color:'#222',borderRadius:'10px',padding:'8px',boxShadow:'0 2px 12px #0003'});
+      for(const [type,name] of [['HIGHLIGHT','高亮'],['NOTE','笔记']]){const b=document.createElement('button');b.textContent=name;b.type='button';Object.assign(b.style,{fontSize:'16px',padding:'8px 16px',border:0,background:'transparent',color:'#222'});b.onpointerdown=e=>e.preventDefault();b.onclick=()=>{if(pendingAnnotation)post('annotation',{...pendingAnnotation,annotationType:type});window.getSelection()?.removeAllRanges();annotationBar.style.display='none';};annotationBar.append(b);}
+      document.body.append(annotationBar);document.addEventListener('selectionchange',selectionChanged);
+      app.eventBus.on('textlayerrendered',({pageNumber})=>{
+        drawAnnotations();if(indexedPages.has(pageNumber))return;indexedPages.add(pageNumber);
+        app.pdfDocument.getPage(pageNumber).then(p=>p.getTextContent()).then(t=>post('indexedPage',{page:pageNumber-1,text:t.items.map(x=>(x.str||'')+(x.hasEOL?'\n':'')).join('')})).catch(()=>{});
+      });
       // In PDF.js 6 the sidebar lives inside the toolbar. Move this existing node outside the
       // hidden upstream toolbar; all official view-manager references and handlers remain intact.
       const sidebar=document.getElementById('viewsManager');
@@ -118,6 +161,7 @@
       app.eventBus.on('updatefindcontrolstate', ({state,matchesCount}) => post('matches',{...matchesCount,state}));
       app.eventBus.on('outlineloaded', ({outlineCount}) => post('outline',{count:outlineCount}));
       app.eventBus.on('pagerendered', ({pageNumber}) => {
+        drawAnnotations();
         document.querySelectorAll('.annotationLayer input,.annotationLayer textarea,.annotationLayer select').forEach(el => {el.disabled=true;});
         if(pageNumber===1) {
           const canvas = app.pdfViewer.getPageView(0)?.canvas;

@@ -17,6 +17,7 @@ class MoyueApplication : Application() {
         super.onCreate()
         container = MoyueContainer(this)
         container.importCoordinator.cleanupAbandonedImports()
+        container.searchIndexer.start()
     }
 }
 
@@ -34,5 +35,7 @@ class MoyueContainer(val applicationContext: Application) {
     val markdown = com.moyue.reader.feature.markdown.MarkdownRepository(applicationContext, database, storage)
     val visuals = com.moyue.reader.feature.image.VisualRepository(database, storage)
     val documents = com.moyue.reader.feature.pdf.PdfRepository(database, storage)
+    val annotations = com.moyue.reader.feature.annotations.AnnotationRepository(database)
+    val searchIndexer = com.moyue.reader.feature.annotations.SearchIndexer(this)
     val documentWrites = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO)
 }

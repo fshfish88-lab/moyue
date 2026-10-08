@@ -68,6 +68,7 @@ class MarkdownRepository(
             gate.committed(revision)
             // Source has committed. A failed index update must not turn a successful write into failure.
             runCatching { database.bookDao().update(book.copy(wordCount = MarkdownText.wordCount(text))) }
+            (context.applicationContext as? com.moyue.reader.MoyueApplication)?.container?.searchIndexer?.markdownSaved(id)
             true
         }
     }

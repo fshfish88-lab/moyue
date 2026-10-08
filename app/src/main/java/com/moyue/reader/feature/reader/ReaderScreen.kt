@@ -111,6 +111,10 @@ fun ReaderScreen(
     onRefreshCatalog:()->Unit={},
     onCatalogSource:(()->Unit)?=null,
     onCatalogDiagnostic:(()->Unit)?=null,
+    annotations: List<com.moyue.reader.core.database.AnnotationEntity> = emptyList(),
+    onSelection: (com.moyue.reader.core.model.ReaderChapter, ReaderPosition, ReaderPosition, String) -> Unit = { _, _, _, _ -> },
+    onAnnotations: () -> Unit = {},
+    onBookmark: () -> Unit = {},
 ) {
     var showChapters by remember { mutableStateOf(false) }
     var showSettings by remember { mutableStateOf(false) }
@@ -126,11 +130,11 @@ fun ReaderScreen(
                     }
                 } else Modifier),
         ) {
-            key(if (preferences.pageMode == PageMode.SCROLL) state.scrollSession.toLong() else state.chapter.id, preferences.pageMode) {
+            key(state.scrollSession, if (preferences.pageMode == PageMode.SCROLL) 0L else state.chapter.id, preferences.pageMode) {
             if (preferences.pageMode == PageMode.SCROLL) {
-                ScrollingChapter(state, onScrollPosition, onPrefetch, onNext)
+                ScrollingChapter(state, onScrollPosition, onPrefetch, onNext, annotations, onSelection)
             } else {
-                PagedChapter(state, onPosition, onPrevious, onNext, onToggleControls)
+                PagedChapter(state, onPosition, onPrevious, onNext, onToggleControls, annotations, onSelection)
             }
 
             }
@@ -157,6 +161,8 @@ fun ReaderScreen(
                         }
                     },
                     actions = {
+                        TextButton(onBookmark) { Text("书签") }
+                        TextButton(onAnnotations) { Text("标注") }
                         IconButton(onClick = { showSettings = true }) {
                             Icon(Icons.Default.MoreVert, contentDescription = "更多阅读设置")
                         }
@@ -207,7 +213,8 @@ private data class ScrollItem(val chapter: com.moyue.reader.core.model.ReaderCha
 }
 
 @Composable
-private fun ScrollingChapter(state: ReaderState, onPosition: (Long, ReaderPosition, Float) -> Unit, onPrefetch: () -> Unit, onNext: () -> Unit) {
+private fun ScrollingChapter(state: ReaderState, onPosition: (Long, ReaderPosition, Float) -> Unit, onPrefetch: () -> Unit, onNext: () -> Unit,
+    annotations: List<com.moyue.reader.core.database.AnnotationEntity>, onSelection: (com.moyue.reader.core.model.ReaderChapter, ReaderPosition, ReaderPosition, String) -> Unit) {
     val window = state.scrollWindow.ifEmpty { listOf(state.chapter) }
     val entries = remember(window) { window.flatMap { chapter -> listOf(ScrollItem(chapter, -1)) + chapter.blocks.indices.map { ScrollItem(chapter, it) } } }
     val initial = remember {
@@ -215,14 +222,14 @@ private fun ScrollingChapter(state: ReaderState, onPosition: (Long, ReaderPositi
         entries.indexOfFirst { it.chapter.id == state.chapter.id && it.block == block }.coerceAtLeast(0)
     }
     val listState = rememberLazyListState(initial)
-    val layouts = remember { mutableStateMapOf<String, androidx.compose.ui.text.TextLayoutResult>() }
+    val layouts = remember { mutableStateMapOf<String, android.text.Layout>() }
     var restored by remember { mutableStateOf(state.position.charOffset == 0) }
     LaunchedEffect(Unit) {
         if (!restored) {
             val item = entries.getOrNull(initial)
             if (item != null) {
                 val layout = snapshotFlow { layouts[item.key] }.filterNotNull().first()
-                val line = layout.getLineForOffset(state.position.charOffset.coerceAtMost(layout.layoutInput.text.length))
+                val line = layout.getLineForOffset(state.position.charOffset.coerceAtMost(layout.text.length))
                 listState.scrollToItem(initial, layout.getLineTop(line).toInt())
             }
             restored = true
@@ -239,7 +246,7 @@ private fun ScrollingChapter(state: ReaderState, onPosition: (Long, ReaderPositi
                 val last = entries.indexOfFirst { it.key == lastKey }
                 if (restored) {
                     val layout = layouts[entry.key]
-                    val offset = layout?.getLineStart(layout.getLineForVerticalPosition(pixels.toFloat())) ?: 0
+                    val offset = layout?.getLineStart(layout.getLineForVertical(pixels)) ?: 0
                     onPosition(entry.chapter.id, ReaderPosition(entry.block.coerceAtLeast(0), offset),
                         (entry.block.coerceAtLeast(0).toFloat() / entry.chapter.blocks.size.coerceAtLeast(1)).coerceIn(0f, 1f))
                 }
@@ -276,7 +283,14 @@ private fun ScrollingChapter(state: ReaderState, onPosition: (Long, ReaderPositi
                     )
                 }
             } else {
-                ReaderBlock(item.chapter.blocks[item.block], state.preferences) { layouts[item.key] = it }
+                val block = item.chapter.blocks[item.block]
+                if (block is ContentBlock.Image) ReaderImage(block)
+                else {
+                    val text = com.moyue.reader.feature.annotations.blockText(block)
+                    AnnotatedReaderText(text, item.chapter, listOf(com.moyue.reader.feature.annotations.TextSegment(0, text.length, item.block, 0)), state.preferences,
+                        annotations, Modifier.fillMaxWidth(), indent = state.preferences.indentParagraphs && block is ContentBlock.Text,
+                        onLayout = { layouts[item.key] = it }, onSelection = onSelection)
+                }
             }
         }
         item {
@@ -290,9 +304,11 @@ private fun ScrollingChapter(state: ReaderState, onPosition: (Long, ReaderPositi
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 @android.annotation.SuppressLint("InlinedApi")
-private fun PagedChapter(state: ReaderState, onPosition: (ReaderPosition, Float) -> Unit, onPrevious:()->Unit,onNext: () -> Unit,onToggleControls:()->Unit) {
+private fun PagedChapter(state: ReaderState, onPosition: (ReaderPosition, Float) -> Unit, onPrevious:()->Unit,onNext: () -> Unit,onToggleControls:()->Unit,
+    annotations: List<com.moyue.reader.core.database.AnnotationEntity>, onSelection: (com.moyue.reader.core.model.ReaderChapter, ReaderPosition, ReaderPosition, String) -> Unit) {
     val density = LocalDensity.current
     val scope = rememberCoroutineScope()
+    var selecting by remember { mutableStateOf(false) }
     val margin = state.preferences.margin.dpValue
     // Explicit insets instead of a hardcoded 76dp: on a device with a tall status bar or a gesture
     // pill the old constant either clipped the first line or left a visible gap.
@@ -358,9 +374,11 @@ private fun PagedChapter(state: ReaderState, onPosition: (ReaderPosition, Float)
             }
             HorizontalPager(
                 state = pager,
+                userScrollEnabled = !selecting,
                 modifier = Modifier.fillMaxWidth().height((maxHeight - footerHeight).coerceAtLeast(1.dp))
                     .pointerInput(pager,state.canGoPrevious,state.canGoNext) {
                         detectTapGestures {offset->
+                            if(selecting) return@detectTapGestures
                             when {
                                 offset.x<size.width*.25f -> if(pager.currentPage>0)scope.launch {pager.animateScrollToPage(pager.currentPage-1)} else if(state.canGoPrevious)onPrevious()
                                 offset.x>size.width*.75f -> if(pager.currentPage<pages.lastIndex)scope.launch {pager.animateScrollToPage(pager.currentPage+1)} else if(state.canGoNext)onNext()
@@ -373,23 +391,8 @@ private fun PagedChapter(state: ReaderState, onPosition: (ReaderPosition, Float)
                     if (pages[page].image != null) {
                         ReaderImage(requireNotNull(pages[page].image), paged = true)
                     } else {
-                    val textColor = MaterialTheme.colorScheme.onBackground.toArgb()
-                    AndroidView(factory = { context -> android.widget.TextView(context).apply {
-                        includeFontPadding = false
-                        setElegantTextHeight(false)
-                        if (android.os.Build.VERSION.SDK_INT >= 28) setFallbackLineSpacing(true)
-                        if (android.os.Build.VERSION.SDK_INT >= 35) setLocalePreferredLineHeightForMinimumUsed(false)
-                        setPadding(0, 0, 0, 0)
-                        breakStrategy = android.graphics.text.LineBreaker.BREAK_STRATEGY_SIMPLE
-                        hyphenationFrequency = android.text.Layout.HYPHENATION_FREQUENCY_NONE
-                        isFocusable = false
-                    } }, update = { view ->
-                        view.setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, fontPx)
-                        view.typeface = state.preferences.nativeTypeface
-                        view.setLineSpacing(fontPx * (state.preferences.nativeLineFactor - 1f), 1f)
-                        view.setTextColor(textColor)
-                        view.text = pages[page].text.trimEnd('\n')
-                    }, modifier = Modifier.fillMaxSize())
+                    AnnotatedReaderText(pages[page].text.trimEnd('\n'), state.chapter, pages[page].segments, state.preferences,
+                        annotations, Modifier.fillMaxSize(), onSelecting = { selecting = it }, onSelection = onSelection)
                     }
                 }
                 else Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {

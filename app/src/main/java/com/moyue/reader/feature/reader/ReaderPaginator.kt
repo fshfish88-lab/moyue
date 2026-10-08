@@ -8,6 +8,7 @@ data class ReaderPage(
     val start: ReaderPosition,
     val end: ReaderPosition,
     val image: ContentBlock.Image? = null,
+    val segments: List<com.moyue.reader.feature.annotations.TextSegment> = emptyList(),
 )
 
 class ReaderPaginator {

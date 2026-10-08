@@ -2,6 +2,7 @@
 (() => {
   'use strict';
   const reading=document.getElementById('reading'),editing=document.getElementById('editing');
+  const marks=new MoyueTextMarks(reading,data=>send('annotation',data),()=>send('annotationMissing'));
   function motion(element) {
     if(document.documentElement.classList.contains('moyue-reduce-motion') || matchMedia('(prefers-reduced-motion: reduce)').matches)return;
     element.getAnimations().forEach(a=>a.cancel());
@@ -56,7 +57,7 @@
     Vditor.highlightRender({enable:true,style:editorTheme==='dark'?'github-dark':'github',lineNumber:false},reading,cdn);
     Vditor.mathRender(reading,{cdn,math});
     send('outline',{items:heads().map((h,i)=>({index:i,text:h.textContent,level:Number(h.tagName.slice(1))}))});
-    requestAnimationFrame(()=>restore(p));
+    requestAnimationFrame(()=>{restore(p);marks.set(marks.items);});
   }
   function emitChange() {
     if(initializing||!ready||composing||!editor)return;
@@ -119,6 +120,9 @@
     });
   }
   window.MoyuePage={
+    annotations(items){marks.set(items);},
+    jumpAnnotation(anchor){if(anchor.position&&!anchor.quote)restore(anchor.position);else marks.jump(anchor);},
+    bookmark(){send('annotation',{annotationType:'BOOKMARK',text:'',anchor:{kind:'MARKDOWN',position:position()}});},
     searchUI(open){searchOpen=!!open;},
     async open(data){session=data.session;current=data.text;persisted=data.text;lastPosition=data.position;ready=true;await render(current,lastPosition);send('opened');if(data.edit)enterEdit();},
     async edit(mode){lastPosition=position();await enterEdit(mode||'ir');},

@@ -54,7 +54,7 @@ import org.json.JSONObject
 import java.io.File
 
 @Composable
-fun VisualScreen(bookId:Long,container:MoyueContainer,preferences:ReaderPreferences,onPreferences:(ReaderPreferences)->Unit,onBack:()->Unit) {
+fun VisualScreen(bookId:Long,container:MoyueContainer,preferences:ReaderPreferences,onPreferences:(ReaderPreferences)->Unit,onBack:()->Unit,initialAnchor:String?=null) {
     var document by remember(bookId) {mutableStateOf<VisualDocument?>(null)}
     var error by remember(bookId) {mutableStateOf<String?>(null)}
     LaunchedEffect(bookId) {
@@ -66,7 +66,7 @@ fun VisualScreen(bookId:Long,container:MoyueContainer,preferences:ReaderPreferen
         when {
             error!=null -> {BackHandler(onBack=onBack);Column(Modifier.fillMaxSize(),verticalArrangement=Arrangement.Center,horizontalAlignment=Alignment.CenterHorizontally){Text(error!!);TextButton(onBack){Text("返回书架")}}}
             doc==null -> {BackHandler(onBack=onBack);Box(Modifier.fillMaxSize(),contentAlignment=Alignment.Center){CircularProgressIndicator()}}
-            else -> LoadedVisual(doc,container,preferences,onPreferences,onBack)
+            else -> LoadedVisual(doc,container,preferences,onPreferences,onBack,initialAnchor)
         }
     }
 }
@@ -75,7 +75,7 @@ private enum class Panel { MENU, THUMBNAILS, BOOKMARKS, APPEARANCE, JUMP }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun LoadedVisual(doc:VisualDocument,container:MoyueContainer,preferences:ReaderPreferences,onPreferences:(ReaderPreferences)->Unit,onBack:()->Unit) {
+private fun LoadedVisual(doc:VisualDocument,container:MoyueContainer,preferences:ReaderPreferences,onPreferences:(ReaderPreferences)->Unit,onBack:()->Unit,initialAnchor:String?=null) {
     val initial=remember(doc) {if(doc.hasPosition) doc.position else doc.position.copy(mode=if(doc.comic) preferences.comicPageMode else "single",fit=preferences.imageFit)}
     var position by remember(doc) {mutableStateOf(initial.safe(doc.pages))}
     var mode by remember(doc) {mutableStateOf(if(doc.comic) position.mode else "single")}
@@ -83,6 +83,8 @@ private fun LoadedVisual(doc:VisualDocument,container:MoyueContainer,preferences
     var page by remember(doc) {mutableIntStateOf(position.pageIndex)}
     var controls by remember {mutableStateOf(true)}
     var panel by remember {mutableStateOf<Panel?>(null)}
+    var annotationDraft by remember { mutableStateOf<com.moyue.reader.feature.annotations.AnnotationDraft?>(null) }
+    var showAnnotations by remember { mutableStateOf(false) }
     var pageText by remember {mutableStateOf("")}
     var exitPending by remember {mutableStateOf(false)}
     var initialized by remember {mutableStateOf(false)}
@@ -117,6 +119,16 @@ private fun LoadedVisual(doc:VisualDocument,container:MoyueContainer,preferences
         page=target;fit=position.fit;mode=if(doc.comic)position.mode else "single";zoomGeneration++
     }
     BackHandler {back()}
+    fun annotationJump(raw:String) {
+        runCatching {
+            val p=JSONObject(raw).getJSONObject("position")
+            require(!p.optBoolean("invalidLegacy")) {"旧书签位置无法解析，记录仍保留"}
+            require(p.optString("sourceHash").isEmpty() || p.optString("sourceHash")==doc.hash) {"原文件已变化，书签仍保留"}
+            val restored=VisualRepository.decode(p.toString()).safe(doc.pages);jump(restored.pageIndex,restored)
+        }.onFailure {notify(it.message ?: "书签定位失败")}
+    }
+    LaunchedEffect(initialAnchor) {initialAnchor?.let {annotationJump(it)}}
+    com.moyue.reader.feature.annotations.AnnotationTools(container, doc.book.id, annotationDraft, {annotationDraft=it}, showAnnotations, {showAnnotations=it}, {a->annotationJump(a.anchorJson)})
     DisposableEffect(window,view) {
         val controller=window?.let {WindowCompat.getInsetsController(it,view)};val old=controller?.systemBarsBehavior
         onDispose {controller?.show(WindowInsetsCompat.Type.systemBars());if(old!=null)controller?.systemBarsBehavior=old}
@@ -193,7 +205,8 @@ private fun LoadedVisual(doc:VisualDocument,container:MoyueContainer,preferences
             TopAppBar(title={Text(doc.book.title,maxLines=1,overflow=TextOverflow.Ellipsis)},navigationIcon={IconButton({back()}){Icon(Icons.AutoMirrored.Filled.ArrowBack,"返回书架")}},
                 actions={IconButton({toggle(Panel.MENU)}){Icon(Icons.Default.MoreVert,"图片漫画菜单")}
                     DropdownMenu(panel==Panel.MENU,{panel=null}) {
-                        if(doc.comic) DropdownMenuItem(text={Text("添加当前位置书签")},onClick={panel=null;scope.launch {runCatching {container.visuals.bookmark(doc,position)}.onSuccess {notify("书签已添加")}.onFailure {notify("添加书签失败")}}})
+                        DropdownMenuItem(text={Text("添加当前位置书签")},onClick={panel=null;annotationDraft=com.moyue.reader.feature.annotations.AnnotationDraft(doc.book.id,JSONObject().put("kind","VISUAL").put("position",JSONObject(VisualRepository.encode(position)).put("sourceHash",doc.hash)).toString(),"","第 ${page+1} 页",doc.hash,"BOOKMARK")})
+                        DropdownMenuItem(text={Text("本书标注")},onClick={panel=null;showAnnotations=true})
                         DropdownMenuItem(text={Text("阅读外观")},onClick={panel=Panel.APPEARANCE})
                         DropdownMenuItem(text={Text("重置缩放与旋转")},onClick={panel=null;position=position.copy(scale=1f,rotation=0,centerX=.5f,centerY=.5f);zoomGeneration++})
                     }
@@ -207,7 +220,8 @@ private fun LoadedVisual(doc:VisualDocument,container:MoyueContainer,preferences
                     TextButton({jump(page+1)},enabled=page<doc.pages.lastIndex){Text("下一页")}
                 } else Text("${doc.pages[0].width} × ${doc.pages[0].height}",style=MaterialTheme.typography.labelSmall,modifier=Modifier.align(Alignment.CenterHorizontally).padding(6.dp))
                 Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),horizontalArrangement=Arrangement.Center) {
-                    if(doc.comic) {TextButton({toggle(Panel.THUMBNAILS)}){Text("缩略图")};TextButton({toggle(Panel.BOOKMARKS)}){Text("书签")}}
+                    if(doc.comic) TextButton({toggle(Panel.THUMBNAILS)}){Text("缩略图")}
+                    TextButton({showAnnotations=true}){Text("标注")}
                     TextButton({toggle(Panel.APPEARANCE)}){Text("外观")}
                     TextButton({scope.launch {activeZoom?.zoomable?.rotateBy(90)}}){Text("旋转")}
                     TextButton({scope.launch {activeZoom?.zoomable?.scaleBy(.8f,animated=true)}}){Text("−")}

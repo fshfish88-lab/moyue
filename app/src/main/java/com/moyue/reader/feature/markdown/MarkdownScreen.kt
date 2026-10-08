@@ -65,6 +65,7 @@ fun MarkdownScreen(
     startEditing: Boolean = false,
     onPreferences: (ReaderPreferences) -> Unit,
     onBack: () -> Unit,
+    initialAnchor: String? = null,
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -95,6 +96,9 @@ fun MarkdownScreen(
     val gate = remember(bookId) { MarkdownRevisionGate() }
     val session = remember(bookId) { UUID.randomUUID().toString() }
     val snackbar = remember { SnackbarHostState() }
+    var annotationDraft by remember { mutableStateOf<com.moyue.reader.feature.annotations.AnnotationDraft?>(null) }
+    var showAnnotations by remember { mutableStateOf(false) }
+    val annotations by container.database.annotationDao().forBook(bookId).collectAsState(initial = emptyList())
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     val fontScale = LocalDensity.current.fontScale
     ReaderDisplayEffects(preferences)
@@ -149,6 +153,11 @@ fun MarkdownScreen(
         val type = data.optString("type")
         if (type != "ready" && data.optString("session") != session) return@message
         when (type) {
+            "annotation" -> {
+                val anchor = data.optJSONObject("anchor") ?: return@message
+                annotationDraft = com.moyue.reader.feature.annotations.AnnotationDraft(bookId, anchor.toString(), data.optString("text"), "Markdown 正文", com.moyue.reader.feature.annotations.textHash(latestText), data.optString("annotationType", "HIGHLIGHT"))
+            }
+            "annotationMissing" -> notify("原文位置已变化，无法唯一定位；摘录仍保留")
             "ready" -> document?.let { doc ->
                 js("open", JSONObject().put("session", session).put("text", doc.text).put("position", doc.state)
                     .put("edit", startEditing && doc.recovery == null && MarkdownText.canEdit(doc.text)).toString())
@@ -222,6 +231,8 @@ fun MarkdownScreen(
     }
     BackHandler { back() }
     LaunchedEffect(loaded,showSearch) { if(loaded) js("searchUI",showSearch.toString()) }
+    LaunchedEffect(loaded, editing, annotations) { if(loaded && !editing) js("annotations", container.annotations.json(annotations)) }
+    LaunchedEffect(loaded, initialAnchor) { if(loaded && initialAnchor != null) { delay(200); js("jumpAnnotation", initialAnchor) } }
 
     val bg = if (preferences.customColors) preferences.backgroundHex else "%06X".format(preferences.theme.palette.background.toArgb() and 0xFFFFFF)
     val ink = if (preferences.customColors) preferences.textHex else "%06X".format(preferences.theme.palette.ink.toArgb() and 0xFFFFFF)
@@ -251,6 +262,8 @@ fun MarkdownScreen(
                             Box {
                                 IconButton(onClick = { val show=!menu; closePanels(); menu=show }) { Icon(Icons.Default.MoreVert, "更多") }
                                 DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                                    DropdownMenuItem(text = { Text("本书标注") }, onClick = { menu = false; showAnnotations = true })
+                                    DropdownMenuItem(text = { Text("添加当前位置书签") }, enabled = loaded && !editing, onClick = { menu = false; js("bookmark") })
                                     DropdownMenuItem(text = { Text("源码编辑") }, enabled = loaded && MarkdownText.canEdit(latestText), onClick = { closePanels(); js("source") })
                                     DropdownMenuItem(text = { Text("查找正文") }, onClick = { closePanels(); showSearch = true; web?.findAllAsync(query) })
                                     DropdownMenuItem(text = { Text("重命名") }, onClick = { menu = false; renameText = title; showRename = true })
@@ -351,4 +364,5 @@ fun MarkdownScreen(
         }
         if (showAppearance) ReaderSettingsSheet(preferences, onPreferences, { showAppearance = false }, showBookNavigation = false)
     }
+    com.moyue.reader.feature.annotations.AnnotationTools(container, bookId, annotationDraft, { annotationDraft = it }, showAnnotations, { showAnnotations = it }, { a -> js("jumpAnnotation", a.anchorJson) })
 }

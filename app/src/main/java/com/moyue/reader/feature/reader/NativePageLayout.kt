@@ -30,7 +30,7 @@ internal object NativePageLayout {
             var start = 0
             suspend fun flush(end: Int) {
                 if (end > start) addAll(create(blocks.subList(start, end), preferences, width, height, fontPx).map {
-                    it.copy(start = it.start.copy(blockIndex = it.start.blockIndex + start), end = it.end.copy(blockIndex = it.end.blockIndex + start))
+                    it.copy(start = it.start.copy(blockIndex = it.start.blockIndex + start), end = it.end.copy(blockIndex = it.end.blockIndex + start), segments = it.segments.map { segment -> segment.copy(blockIndex = segment.blockIndex + start) })
                 })
             }
             blocks.forEachIndexed { index, block ->
@@ -73,7 +73,15 @@ internal object NativePageLayout {
                 while (line + 1 < layout.lineCount && layout.getLineBottom(line + 1) - top <= height) line++
                 val start = layout.getLineStart(first)
                 val end = layout.getLineEnd(line)
-                add(ReaderPage(full.substring(start, end), position(start), position(end)))
+                val segments = texts.indices.mapNotNull { i ->
+                    val contentStart = starts[i] + prefixes[i].length
+                    val contentEnd = starts[i] + texts[i].length
+                    val left = maxOf(start, contentStart)
+                    val right = minOf(end, contentEnd)
+                    if (left >= right) null else com.moyue.reader.feature.annotations.TextSegment(left - start, right - start, i,
+                        originals[i].length - originals[i].trimStart().length + left - contentStart)
+                }
+                add(ReaderPage(full.substring(start, end), position(start), position(end), segments = segments))
                 line++
             }
         }

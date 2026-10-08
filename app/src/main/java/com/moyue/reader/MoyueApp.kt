@@ -48,10 +48,12 @@ import kotlinx.coroutines.withContext
 private sealed interface AppScreen {
     data object Shelf : AppScreen
     data object Settings : AppScreen
-    data class Reader(val bookId: Long, val chapterIndex: Int? = null) : AppScreen
-    data class Markdown(val bookId: Long, val edit: Boolean = false) : AppScreen
-    data class Pdf(val bookId: Long) : AppScreen
-    data class Visual(val bookId: Long) : AppScreen
+    data object Annotations : AppScreen
+    data object Search : AppScreen
+    data class Reader(val bookId: Long, val chapterIndex: Int? = null, val anchor: String? = null) : AppScreen
+    data class Markdown(val bookId: Long, val edit: Boolean = false, val anchor: String? = null) : AppScreen
+    data class Pdf(val bookId: Long, val anchor: String? = null) : AppScreen
+    data class Visual(val bookId: Long, val anchor: String? = null) : AppScreen
     data class Detail(val bookId: Long) : AppScreen
     data class Browser(val url: String) : AppScreen
 }
@@ -84,14 +86,14 @@ fun MoyueApp(container: MoyueContainer, sharedUrl: String? = null) {
         }
     }
 
-    fun openContent(id: Long, edit: Boolean = false) {
+    fun openContent(id: Long, edit: Boolean = false, anchor: String? = null) {
         scope.launch {
             val book = container.database.bookDao().get(id) ?: return@launch
             screen = when (com.moyue.reader.core.document.ReaderEngineRegistry.item(book).format) {
-                com.moyue.reader.core.document.DocumentFormat.MARKDOWN -> AppScreen.Markdown(id,edit)
-                com.moyue.reader.core.document.DocumentFormat.PDF -> AppScreen.Pdf(id)
-                com.moyue.reader.core.document.DocumentFormat.IMAGE, com.moyue.reader.core.document.DocumentFormat.COMIC -> AppScreen.Visual(id)
-                else -> AppScreen.Reader(id)
+                com.moyue.reader.core.document.DocumentFormat.MARKDOWN -> AppScreen.Markdown(id,edit,anchor)
+                com.moyue.reader.core.document.DocumentFormat.PDF -> AppScreen.Pdf(id,anchor)
+                com.moyue.reader.core.document.DocumentFormat.IMAGE, com.moyue.reader.core.document.DocumentFormat.COMIC -> AppScreen.Visual(id,anchor)
+                else -> AppScreen.Reader(id,anchor=anchor)
             }
         }
     }
@@ -110,6 +112,8 @@ fun MoyueApp(container: MoyueContainer, sharedUrl: String? = null) {
                 onBookDetails = { screen = AppScreen.Detail(it) },
                 onAddBook = { showImport = true },
                 onSettings = { screen = AppScreen.Settings },
+                onGlobalSearch = { screen = AppScreen.Search },
+                onAnnotations = { screen = AppScreen.Annotations },
                 onDeleteBook = { id ->
                     scope.launch {
                         runCatching { deleteShelfBook(container, id) }
@@ -118,6 +122,8 @@ fun MoyueApp(container: MoyueContainer, sharedUrl: String? = null) {
                     }
                 },
             )
+            AppScreen.Annotations -> com.moyue.reader.feature.annotations.AnnotationCenter(container, { screen = AppScreen.Shelf }, { id, anchor -> openContent(id, anchor = anchor) })
+            AppScreen.Search -> com.moyue.reader.feature.annotations.GlobalSearch(container, { screen = AppScreen.Shelf }, { id, anchor -> openContent(id, anchor = anchor) })
             AppScreen.Settings -> SettingsScreen(
                 preferences = preferences,
                 onPreferences = { value -> scope.launch { container.preferences.update { value } } },
@@ -146,13 +152,15 @@ fun MoyueApp(container: MoyueContainer, sharedUrl: String? = null) {
             is AppScreen.Markdown -> com.moyue.reader.feature.markdown.MarkdownScreen(
                 bookId = destination.bookId, container = container, preferences = preferences,
                 startEditing = destination.edit, onBack = { screen = AppScreen.Shelf },
+                initialAnchor = destination.anchor,
                 onPreferences = { value -> scope.launch { container.preferences.update { value } } },
             )
             is AppScreen.Pdf -> com.moyue.reader.feature.pdf.PdfScreen(
                 bookId=destination.bookId, container=container, preferences=preferences,
+                initialAnchor=destination.anchor,
                 onPreferences={value -> scope.launch {container.preferences.update {value}}}, onBack={screen=AppScreen.Shelf},
             )
-            is AppScreen.Visual -> com.moyue.reader.feature.image.VisualScreen(destination.bookId, container, preferences, { value -> scope.launch {container.preferences.update {value}} }, {screen=AppScreen.Shelf})
+            is AppScreen.Visual -> com.moyue.reader.feature.image.VisualScreen(destination.bookId, container, preferences, { value -> scope.launch {container.preferences.update {value}} }, {screen=AppScreen.Shelf}, initialAnchor=destination.anchor)
             is AppScreen.Detail -> DetailDestination(
                 bookId = destination.bookId,
                 books = books,
@@ -270,15 +278,21 @@ private fun ReaderDestination(
     val state by viewModel.state.collectAsState()
     val openError by viewModel.openError.collectAsState()
     val scope = rememberCoroutineScope()
-    LaunchedEffect(destination.bookId, destination.chapterIndex) {
+    LaunchedEffect(destination.bookId, destination.chapterIndex, destination.anchor) {
         viewModel.open(destination.bookId, destination.chapterIndex)
         viewModel.updatePreferences(preferences)
+        destination.anchor?.let { viewModel.jumpToAnchor(it) }
     }
     LaunchedEffect(preferences) { viewModel.updatePreferences(preferences) }
     BackHandler {
         scope.launch { viewModel.flushProgressOnBack(); onBack() }
     }
     var showCatalogSource by remember {mutableStateOf(false)}
+    var annotationDraft by remember { mutableStateOf<com.moyue.reader.feature.annotations.AnnotationDraft?>(null) }
+    var showAnnotations by remember { mutableStateOf(false) }
+    val annotations by container.database.annotationDao().forBook(destination.bookId).collectAsState(initial = emptyList())
+    LaunchedEffect(state?.scrollWindow) { state?.scrollWindow?.forEach { container.searchIndexer.chapterLoaded(destination.bookId, it) } }
+    LaunchedEffect(state?.jumpHighlight) { if(state?.jumpHighlight != null) { kotlinx.coroutines.delay(2500); viewModel.clearJumpHighlight() } }
     var catalogSource by remember {mutableStateOf("")}
     var catalogSourceError by remember {mutableStateOf<String?>(null)}
     val exportDiagnostic=rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/plain")) {uri->
@@ -327,6 +341,13 @@ private fun ReaderDestination(
     } else {
         ReaderScreen(
             state = current,
+            annotations = annotations + listOfNotNull(current.jumpHighlight?.let { raw ->
+                val a=org.json.JSONObject(raw)
+                com.moyue.reader.core.database.AnnotationEntity(id=-1,bookId=current.bookId,type="HIGHLIGHT",anchorJson=raw,selectedText=a.optString("quote"),note="",color="yellow",location="",sourceHash=com.moyue.reader.feature.annotations.textHash(com.moyue.reader.feature.annotations.blockText(current.chapter.blocks[a.optInt("blockIndex")])),createdAt=0,updatedAt=0)
+            }),
+            onSelection = { chapter, start, end, type -> annotationDraft = com.moyue.reader.feature.annotations.textDraft(current.bookId, chapter, start, end, type) },
+            onAnnotations = { showAnnotations = true },
+            onBookmark = { annotationDraft = com.moyue.reader.feature.annotations.textDraft(current.bookId, current.chapter, current.position, current.position, "BOOKMARK") },
             onBack = { scope.launch { viewModel.flushProgressOnBack(); onBack() } },
             onToggleControls = viewModel::toggleControls,
             onPrevious = { scope.launch { viewModel.goPrevious() } },
@@ -345,6 +366,7 @@ private fun ReaderDestination(
             onCatalogDiagnostic = {exportDiagnostic.launch("墨阅-目录诊断-${destination.bookId}.txt")},
             onPreferences = { viewModel.updatePreferences(it); onPreferences(it) },
         )
+        com.moyue.reader.feature.annotations.AnnotationTools(container, destination.bookId, annotationDraft, { annotationDraft = it }, showAnnotations, { showAnnotations = it }, { a -> scope.launch { viewModel.jumpToAnchor(a.anchorJson) } })
     }
 }
 
@@ -395,6 +417,7 @@ private suspend fun deleteShelfBook(container: MoyueContainer, bookId: Long) = w
     check(!files.exists() || files.deleteRecursively()) { "无法删除书籍副本" }
     check(cache == null || !cache.exists() || cache.deleteRecursively()) { "无法删除书籍缓存" }
     container.database.bookDao().delete(book)
+    container.database.searchDao().prune()
 }
 
 private fun displayName(context: Context, uri: Uri): String? = runCatching {

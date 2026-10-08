@@ -88,6 +88,8 @@ fun BookshelfScreen(
     onSettings: () -> Unit,
     onDeleteBook: (Long) -> Unit,
     onEditMarkdown: (Long) -> Unit = onOpenBook,
+    onGlobalSearch: (() -> Unit)? = null,
+    onAnnotations: () -> Unit = {},
 ) {
     var pendingDelete by remember { mutableStateOf<BookEntity?>(null) }
     var actionSheet by remember { mutableStateOf<BookEntity?>(null) }
@@ -174,7 +176,7 @@ fun BookshelfScreen(
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
                 title = { Text("墨阅", style = MoyueWordmark) },
                 actions = {
-                    IconButton(onClick = { if(searchVisible) closeSearch() else searchVisible=true }) {
+                    IconButton(onClick = { if(onGlobalSearch != null) onGlobalSearch() else if(searchVisible) closeSearch() else searchVisible=true }) {
                         Icon(
                             if (searchVisible) Icons.Default.Close else Icons.Default.Search,
                             contentDescription = if (searchVisible) "关闭搜索" else "搜索书籍",
@@ -199,6 +201,12 @@ fun BookshelfScreen(
                     onClick = {},
                     icon = { Icon(Icons.Default.Home, contentDescription = null) },
                     label = { Text("书架") },
+                )
+                NavigationBarItem(
+                    selected = false,
+                    onClick = onAnnotations,
+                    icon = { Icon(Icons.Default.Home, contentDescription = null) },
+                    label = { Text("摘录") },
                 )
                 NavigationBarItem(
                     selected = false,

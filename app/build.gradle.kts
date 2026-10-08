@@ -15,10 +15,10 @@ android {
         applicationId = "com.moyue.reader"
         minSdk = 26
         targetSdk = 36
-        versionCode = 22
-        // V1.5.4: complete web catalogs and verified GitHub app updates.
-        versionName = "1.5.4"
-        testInstrumentationRunner = "com.moyue.reader.feature.pdf.PdfSmokeInstrumentation"
+        versionCode = 23
+        // V1.6: local annotations, excerpts and global content search.
+        versionName = "1.6.0"
+        testInstrumentationRunner = "com.moyue.reader.feature.annotations.V160Instrumentation"
     }
 
     buildTypes {
