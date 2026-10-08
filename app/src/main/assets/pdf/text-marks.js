@@ -51,7 +51,12 @@ window.MoyueTextMarks = class {
   }
   set(items) {
     this.items=items;this.clear();const text=this.text(),colors={yellow:'#efc75266',green:'#6fcf9766',blue:'#6caff066',pink:'#f493b266'};
-    for(const item of items){if(item.anchor.kind!=='MARKDOWN')continue;const range=this.locate(item.anchor,text);if(range)this.paint(range,colors[item.color]||colors.yellow);}
+    let ranges=[];
+    for(const item of items){if(item.anchor.kind!=='MARKDOWN')continue;const range=this.locate(item.anchor,text);if(!range)continue;
+      ranges=ranges.flatMap(old=>old.end<=range[0]||old.start>=range[1]?[old]:[old.start<range[0]?{...old,end:range[0]}:null,old.end>range[1]?{...old,start:range[1]}:null].filter(Boolean));
+      ranges.push({start:range[0],end:range[1],color:colors[item.color]||colors.yellow});
+    }
+    for(const range of ranges)this.paint([range.start,range.end],range.color);
   }
   jump(anchor) {
     if(anchor.position && !anchor.quote){window.scrollTo(0,anchor.position.offset||0);return;}

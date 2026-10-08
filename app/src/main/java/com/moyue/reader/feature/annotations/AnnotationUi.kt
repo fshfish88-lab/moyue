@@ -69,7 +69,7 @@ fun AnnotationTools(container: MoyueContainer, bookId: Long, draft: AnnotationDr
             items(items, key = { it.id }) { a -> AnnotationRow(a, onOpen = { onList(false); onOpen(a) }, onEdit = { edit = a }, onDelete = { delete = a }) }
         }
     }
-    val editing = edit
+    val editing = edit ?: draft?.let { current -> items.firstOrNull { sameAnnotationRange(it, current) } }
     val currentDraft = editing?.let { AnnotationDraft(it.bookId, it.anchorJson, it.selectedText, it.location, it.sourceHash, it.type) } ?: draft
     if (currentDraft != null) AnnotationEditor(currentDraft, editing, onDismiss = { edit = null; onDraft(null) }, onSave = { note, color ->
         scope.launch {

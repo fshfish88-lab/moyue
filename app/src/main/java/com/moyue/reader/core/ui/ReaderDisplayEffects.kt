@@ -21,7 +21,7 @@ fun ReaderDisplayEffects(preferences: ReaderPreferences) {
         }
     }
     SideEffect {
-        view.keepScreenOn = preferences.keepScreenOn
-        window?.let { it.attributes = it.attributes.apply { screenBrightness = preferences.brightness } }
+        if (view.keepScreenOn != preferences.keepScreenOn) view.keepScreenOn = preferences.keepScreenOn
+        window?.let { if (it.attributes.screenBrightness != preferences.brightness) it.attributes = it.attributes.apply { screenBrightness = preferences.brightness } }
     }
 }

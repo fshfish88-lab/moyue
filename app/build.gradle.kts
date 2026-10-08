@@ -15,9 +15,9 @@ android {
         applicationId = "com.moyue.reader"
         minSdk = 26
         targetSdk = 36
-        versionCode = 23
-        // V1.6: local annotations, excerpts and global content search.
-        versionName = "1.6.0"
+        versionCode = 24
+        // V1.6.1: highlight replacement, glyph-only paint and responsive reader settings.
+        versionName = "1.6.1"
         testInstrumentationRunner = "com.moyue.reader.feature.annotations.V160Instrumentation"
     }
 

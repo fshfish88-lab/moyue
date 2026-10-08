@@ -34,6 +34,8 @@ interface AnnotationDao {
     fun observeAll(): Flow<List<AnnotationItem>>
     @Query("SELECT * FROM annotations WHERE bookId=:bookId ORDER BY createdAt DESC")
     fun forBook(bookId: Long): Flow<List<AnnotationEntity>>
+    @Query("SELECT * FROM annotations WHERE bookId=:bookId ORDER BY updatedAt DESC, id DESC")
+    suspend fun listForBook(bookId: Long): List<AnnotationEntity>
     @Insert suspend fun insert(annotation: AnnotationEntity): Long
     @Update suspend fun update(annotation: AnnotationEntity)
     @Query("DELETE FROM annotations WHERE id=:id") suspend fun delete(id: Long)

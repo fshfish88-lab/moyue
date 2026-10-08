@@ -31,7 +31,7 @@ class V160Instrumentation : Instrumentation() {
             if (suite == "snapshot") {
                 val db = c.database.openHelper.readableDatabase
                 val snapshot = JSONObject().put("schema", db.version)
-                for (table in listOf("books", "reading_progress", "document_states", "document_bookmarks")) {
+                for (table in listOf("books", "reading_progress", "document_states", "document_bookmarks", "annotations")) {
                     val rows = org.json.JSONArray()
                     db.query("SELECT * FROM $table ORDER BY 1").use { cursor -> while(cursor.moveToNext()) {
                         val row=JSONObject();for(i in 0 until cursor.columnCount)row.put(cursor.getColumnName(i),if(cursor.isNull(i))JSONObject.NULL else cursor.getString(i));rows.put(row)
@@ -226,9 +226,9 @@ class V160Instrumentation : Instrumentation() {
             verify(native.selectedText=="明月照天涯" && native.note=="V160UI原生笔记","native TextView selection saves source offsets")
             screenshot("v160-native.png")
             runBlocking {c.preferences.update {before.copy(fontSizeSp=before.fontSizeSp+2)}};SystemClock.sleep(2000)
-            runOnMainSync {verify(checkNotNull(findText(activity.window.decorView)).text.let {it is android.text.Spanned && it.getSpans(0,it.length,android.text.style.BackgroundColorSpan::class.java).isNotEmpty()},"highlight survives font reflow")}
+            runOnMainSync {verify(checkNotNull(findText(activity.window.decorView)).text.let {it is android.text.Spanned && it.getSpans(0,it.length,com.moyue.reader.feature.reader.ReaderHighlightSpan::class.java).isNotEmpty()},"highlight survives font reflow")}
             runBlocking {c.preferences.update {it.copy(pageMode=com.moyue.reader.core.settings.PageMode.PAGED)}};SystemClock.sleep(2000)
-            runOnMainSync {verify(checkNotNull(findText(activity.window.decorView)).text.let {it is android.text.Spanned && it.getSpans(0,it.length,android.text.style.BackgroundColorSpan::class.java).isNotEmpty()},"saved highlight appears in paged mode")};screenshot("v160-paged.png")
+            runOnMainSync {verify(checkNotNull(findText(activity.window.decorView)).text.let {it is android.text.Spanned && it.getSpans(0,it.length,com.moyue.reader.feature.reader.ReaderHighlightSpan::class.java).isNotEmpty()},"saved highlight appears in paged mode")};screenshot("v160-paged.png")
             runBlocking {c.preferences.update {it.copy(pageMode=com.moyue.reader.core.settings.PageMode.SCROLL)}};SystemClock.sleep(1200)
             runOnMainSync {activity.requestedOrientation=android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE};SystemClock.sleep(2200)
             verify(runBlocking {c.database.annotationDao().forBook(bookId).first().single().anchorJson}==native.anchorJson,"orientation does not mutate source anchor")
@@ -243,7 +243,7 @@ class V160Instrumentation : Instrumentation() {
             click("搜索书籍");waitFor("全局搜索")
             nodes().first {it.isEditable}.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT,Bundle().apply {putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE,needle.lowercase())})
             click("正文");click("V160UI文本 · ${bodyHit.chunk.location}");SystemClock.sleep(800)
-            runOnMainSync {verify(checkNotNull(findText(activity.window.decorView,needle)).text.let {it is android.text.Spanned&&it.getSpans(0,it.length,android.text.style.BackgroundColorSpan::class.java).isNotEmpty()},"global body result jumps and highlights exact source")}
+            runOnMainSync {verify(checkNotNull(findText(activity.window.decorView,needle)).text.let {it is android.text.Spanned&&it.getSpans(0,it.length,com.moyue.reader.feature.reader.ReaderHighlightSpan::class.java).isNotEmpty()},"global body result jumps and highlights exact source")}
             sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK);waitFor("墨阅")
 
             val mdId=runBlocking {
@@ -281,7 +281,10 @@ class V160Instrumentation : Instrumentation() {
             verify(rendered,"PDF mark rendered")
             js("document.querySelector('.moyue-highlight-layer > div').scrollIntoView({block:'center'})");SystemClock.sleep(400)
             verify(js("(()=>{const r=document.querySelector('.moyue-highlight-layer > div').getBoundingClientRect();return r.width>0&&r.height>0&&r.top>100&&r.bottom<innerHeight-130})()") == "true","PDF highlight is visible within viewport")
-            screenshot("v160-pdf.png");js("MoyuePdf.zoom(1)");SystemClock.sleep(1000)
+            screenshot("v160-pdf.png")
+            val zoomAlignment=js("(()=>{const app=PDFViewerApplication;app.pdfViewer.updateScale({steps:1,drawingDelay:600});const page=app.pdfViewer.getPageView(0),after=document.querySelector('.moyue-highlight-layer > div').getBoundingClientRect(),rect=JSON.parse('${pdf.anchorJson.replace("'", "\\'")}').pageRects[0],p1=page.viewport.convertToViewportPoint(rect[0],rect[1]),p2=page.viewport.convertToViewportPoint(rect[2],rect[3]),bounds=page.div.getBoundingClientRect();return Math.abs(after.width-Math.abs(p2[0]-p1[0]))<2&&Math.abs(after.left-bounds.left-Math.min(p1[0],p2[0]))<2})()")
+            verify(zoomAlignment=="true","PDF mark stays attached during delayed zoom before canvas rerender")
+            SystemClock.sleep(1000)
             verify(js("document.querySelectorAll('.moyue-highlight-layer').length").toInt()>0,"PDF marks survive zoom")
             click("返回书架");waitFor("墨阅")
         } finally {runBlocking {

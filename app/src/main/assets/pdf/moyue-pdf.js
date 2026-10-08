@@ -6,15 +6,29 @@
   function drawAnnotations() {
     document.querySelectorAll('.moyue-highlight-layer').forEach(n=>n.remove());
     const colors={yellow:'#efc75266',green:'#6fcf9766',blue:'#6caff066',pink:'#f493b266'};
+    const pages=new Map();
     for(const item of annotations){
       const a=item.anchor;if(a.kind!=='PDF'||!a.pageRects?.length)continue;
       const page=app.pdfViewer.getPageView(a.pageIndex),node=page?.div;if(!node||!page.viewport)continue;
+      for(const rect of a.pageRects){
+        const r=[...page.viewport.convertToViewportPoint(rect[0],rect[1]),...page.viewport.convertToViewportPoint(rect[2],rect[3])];
+        const mark={left:Math.min(r[0],r[2])/page.viewport.width,top:Math.min(r[1],r[3])/page.viewport.height,right:Math.max(r[0],r[2])/page.viewport.width,bottom:Math.max(r[1],r[3])/page.viewport.height,color:colors[item.color]||colors.yellow};
+        if(mark.right<=mark.left||mark.bottom<=mark.top)continue;
+        const regions=pages.get(a.pageIndex)||[];
+        pages.set(a.pageIndex,regions.flatMap(old=>{
+          const left=Math.max(old.left,mark.left),top=Math.max(old.top,mark.top),right=Math.min(old.right,mark.right),bottom=Math.min(old.bottom,mark.bottom);
+          if(left>=right||top>=bottom)return [old];
+          return [old.top<top?{...old,bottom:top}:null,old.bottom>bottom?{...old,top:bottom}:null,old.left<left?{...old,top,bottom,right:left}:null,old.right>right?{...old,top,bottom,left:right}:null].filter(Boolean);
+        }).concat(mark));
+      }
+    }
+    for(const [index,regions] of pages){
       const layer=document.createElement('div');layer.className='moyue-highlight-layer';
       Object.assign(layer.style,{position:'absolute',inset:'0',pointerEvents:'none',zIndex:'4'});
-      for(const rect of a.pageRects){
-        const r=[...page.viewport.convertToViewportPoint(rect[0],rect[1]),...page.viewport.convertToViewportPoint(rect[2],rect[3])],mark=document.createElement('div');
-        Object.assign(mark.style,{position:'absolute',left:Math.min(r[0],r[2])+'px',top:Math.min(r[1],r[3])+'px',width:Math.abs(r[2]-r[0])+'px',height:Math.abs(r[3]-r[1])+'px',background:colors[item.color]||colors.yellow});layer.append(mark);
-      }node.append(layer);
+      for(const r of regions){const mark=document.createElement('div');
+        // Percentages follow PDF.js's immediate CSS zoom while the canvas rerender is delayed.
+        Object.assign(mark.style,{position:'absolute',left:r.left*100+'%',top:r.top*100+'%',width:(r.right-r.left)*100+'%',height:(r.bottom-r.top)*100+'%',background:r.color});layer.append(mark);
+      }app.pdfViewer.getPageView(index).div.append(layer);
     }
   }
   function selectionChanged() {
@@ -130,6 +144,8 @@
       Object.assign(annotationBar.style,{position:'fixed',bottom:'84px',left:'50%',transform:'translateX(-50%)',zIndex:'100000',display:'none',background:'#fff',color:'#222',borderRadius:'10px',padding:'8px',boxShadow:'0 2px 12px #0003'});
       for(const [type,name] of [['HIGHLIGHT','高亮'],['NOTE','笔记']]){const b=document.createElement('button');b.textContent=name;b.type='button';Object.assign(b.style,{fontSize:'16px',padding:'8px 16px',border:0,background:'transparent',color:'#222'});b.onpointerdown=e=>e.preventDefault();b.onclick=()=>{if(pendingAnnotation)post('annotation',{...pendingAnnotation,annotationType:type});window.getSelection()?.removeAllRanges();annotationBar.style.display='none';};annotationBar.append(b);}
       document.body.append(annotationBar);document.addEventListener('selectionchange',selectionChanged);
+      app.eventBus.on('scalechanging',drawAnnotations);
+      app.eventBus.on('rotationchanging',drawAnnotations);
       app.eventBus.on('textlayerrendered',({pageNumber})=>{
         drawAnnotations();if(indexedPages.has(pageNumber))return;indexedPages.add(pageNumber);
         app.pdfDocument.getPage(pageNumber).then(p=>p.getTextContent()).then(t=>post('indexedPage',{page:pageNumber-1,text:t.items.map(x=>(x.str||'')+(x.hasEOL?'\n':'')).join('')})).catch(()=>{});

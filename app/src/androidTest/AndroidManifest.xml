@@ -1,5 +1,6 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <instrumentation android:name="com.moyue.reader.feature.annotations.V160Instrumentation" android:targetPackage="com.moyue.reader" />
+    <instrumentation android:name="com.moyue.reader.feature.annotations.V161Instrumentation" android:targetPackage="com.moyue.reader" />
     <instrumentation android:name="com.moyue.reader.feature.markdown.MarkdownSmokeInstrumentation" android:targetPackage="com.moyue.reader" />
     <instrumentation android:name="com.moyue.reader.feature.pdf.PdfSnapshotInstrumentation" android:targetPackage="com.moyue.reader" />
     <instrumentation android:name="com.moyue.reader.feature.image.VisualSmokeInstrumentation" android:targetPackage="com.moyue.reader" />

@@ -169,15 +169,15 @@ fun SystemBarsColor(background: Color, darkIcons: Boolean) {
     }
 
     SideEffect {
-        window.statusBarColor = argb
-        window.navigationBarColor = argb
+        if (window.statusBarColor != argb) window.statusBarColor = argb
+        if (window.navigationBarColor != argb) window.navigationBarColor = argb
         if (android.os.Build.VERSION.SDK_INT >= 29) {
             // Android 10+ scrims the nav bar translucently unless this is cleared.
-            window.isNavigationBarContrastEnforced = false
+            if (window.isNavigationBarContrastEnforced) window.isNavigationBarContrastEnforced = false
         }
         val controller = WindowCompat.getInsetsController(window, view)
-        controller.isAppearanceLightStatusBars = darkIcons
-        controller.isAppearanceLightNavigationBars = darkIcons
+        if (controller.isAppearanceLightStatusBars != darkIcons) controller.isAppearanceLightStatusBars = darkIcons
+        if (controller.isAppearanceLightNavigationBars != darkIcons) controller.isAppearanceLightNavigationBars = darkIcons
     }
 }
 
@@ -189,6 +189,7 @@ fun MoyueTheme(content: @Composable () -> Unit) {
 
 @Composable
 fun MoyueReaderTheme(preferences: ReaderPreferences, content: @Composable () -> Unit) {
+    val scheme = androidx.compose.runtime.remember(preferences.theme, preferences.customColors, preferences.backgroundHex, preferences.textHex) {
     val original = readerScheme(preferences.theme)
     val bg = if (preferences.customColors) {
         runCatching { Color(("#" + preferences.backgroundHex).toColorInt()) }.getOrDefault(original.background)
@@ -197,7 +198,7 @@ fun MoyueReaderTheme(preferences: ReaderPreferences, content: @Composable () -> 
         runCatching { Color(("#" + preferences.textHex).toColorInt()) }.getOrDefault(original.onBackground)
     } else original.onBackground
 
-    val scheme = original.copy(
+    original.copy(
         background = bg,
         onBackground = ink,
         surface = bg,
@@ -220,7 +221,8 @@ fun MoyueReaderTheme(preferences: ReaderPreferences, content: @Composable () -> 
         outline = ink.copy(alpha = .18f),
         outlineVariant = ink.copy(alpha = .18f),
     )
-    SystemBarsColor(background = bg, darkIcons = appWantsDarkIcons(ink))
+    }
+    SystemBarsColor(background = scheme.background, darkIcons = appWantsDarkIcons(scheme.onBackground))
     MaterialTheme(colorScheme = scheme, typography = MoyueTypography, content = content)
 }
 
