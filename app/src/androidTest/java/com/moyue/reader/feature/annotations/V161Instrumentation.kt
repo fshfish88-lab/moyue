@@ -158,7 +158,10 @@ class V161Instrumentation : Instrumentation() {
             val durations = mutableListOf<Long>()
             repeat(4) {
                 // The fixture opens with the reader controls visible.
-                val start = SystemClock.elapsedRealtime(); click("更多阅读设置"); waitFor("主题")
+                val settingsBounds = android.graphics.Rect(); waitFor("更多阅读设置").getBoundsInScreen(settingsBounds)
+                val start = SystemClock.elapsedRealtime(); tap(settingsBounds.exactCenterX(), settingsBounds.exactCenterY())
+                val injected = SystemClock.elapsedRealtime(); waitFor("主题")
+                report("SETTINGS inputMs=${injected - start} visibleWaitMs=${SystemClock.elapsedRealtime() - injected}")
                 durations += SystemClock.elapsedRealtime() - start
                 SystemClock.sleep(650); sendKeyDownUpSync(KeyEvent.KEYCODE_BACK); waitFor("阅读设置"); SystemClock.sleep(250)
             }
@@ -167,6 +170,22 @@ class V161Instrumentation : Instrumentation() {
             val frames = synchronized(beforeFrames) { beforeFrames.sorted() }
             report("SETTINGS openMs=$durations frames=${frames.size} p95GapMs=${frames.getOrNull((frames.size * .95).toInt())} maxGapMs=${frames.lastOrNull()} over50ms=${frames.count { it > 50 }}")
             verify(durations.all { it < 1500 }, "reading settings opens within 1500ms on the test emulator")
+            // Verify that all settings remain reachable without changing the existing layout.
+            click("更多阅读设置"); val settingsWindow = waitFor("主题").windowId
+            var reachedBottom = false
+            repeat(12) {
+                if (android.os.Build.VERSION.SDK_INT >= 33) uiAutomation.clearCache()
+                if (nodes().any { it.windowId == settingsWindow && it.text?.toString() == "恢复默认" && it.isVisibleToUser }) {
+                    reachedBottom = true
+                } else {
+                    nodes().lastOrNull { it.windowId == settingsWindow && it.isScrollable }?.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)
+                    SystemClock.sleep(200)
+                }
+            }
+            verify(reachedBottom, "offscreen settings remain reachable by scrolling")
+            click("恢复默认"); SystemClock.sleep(250)
+            verify(readerPreferences.value == com.moyue.reader.core.settings.ReaderPreferences(), "bottom reset action updates reader preferences")
+            sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
             uiAutomation.takeScreenshot().let { bitmap -> File(targetContext.getExternalFilesDir(null), "v161-reader.png").outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }; bitmap.recycle() }
         } catch (e: Throwable) { failures += e.stackTraceToString() }
         finally {

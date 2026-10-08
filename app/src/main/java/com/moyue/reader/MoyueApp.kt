@@ -291,7 +291,6 @@ private fun ReaderDestination(
     var annotationDraft by remember { mutableStateOf<com.moyue.reader.feature.annotations.AnnotationDraft?>(null) }
     var showAnnotations by remember { mutableStateOf(false) }
     val annotations by container.database.annotationDao().forBook(destination.bookId).collectAsState(initial = emptyList())
-    LaunchedEffect(state?.scrollWindow) { state?.scrollWindow?.forEach { container.searchIndexer.chapterLoaded(destination.bookId, it) } }
     LaunchedEffect(state?.jumpHighlight) { if(state?.jumpHighlight != null) { kotlinx.coroutines.delay(2500); viewModel.clearJumpHighlight() } }
     var catalogSource by remember {mutableStateOf("")}
     var catalogSourceError by remember {mutableStateOf<String?>(null)}

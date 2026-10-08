@@ -140,7 +140,6 @@ fun AnnotationCenter(container: MoyueContainer, onBack: () -> Unit, onOpen: (Lon
 @Composable
 fun GlobalSearch(container: MoyueContainer, onBack: () -> Unit, onOpen: (Long, String?) -> Unit) {
     val books by container.database.bookDao().observeAll().collectAsState(initial = emptyList())
-    val annotations by container.database.annotationDao().observeAll().collectAsState(initial = emptyList())
     val states by container.database.searchDao().observeStates().collectAsState(initial = emptyList())
     var query by remember { mutableStateOf("") }
     var tab by remember { mutableStateOf("全部") }
@@ -148,41 +147,43 @@ fun GlobalSearch(container: MoyueContainer, onBack: () -> Unit, onOpen: (Long, S
     var limit by remember { mutableIntStateOf(40) }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
-    LaunchedEffect(query, limit, states) {
+    LaunchedEffect(query, limit, states, tab) {
         busy = true; error = null
-        try { delay(300); hits = if (query.isBlank()) emptyList() else container.database.searchDao().search(SearchTerms.query(query), query.trim().take(120), limit + 1, 0) }
+        try { delay(300); hits = if (query.isBlank() || tab == "名称") emptyList() else container.database.searchDao().search(SearchTerms.query(query), query.trim().take(120), limit + 1, 0, when (tab) { "目录" -> "CATALOG"; "正文" -> "BODY"; else -> "ALL" }) }
         catch (e: CancellationException) { throw e }
         catch (e: Exception) { error = "搜索失败，请重建索引后重试" }
         finally { busy = false }
     }
     val q = query.trim().take(120)
-    val matchedBooks = if (q.isEmpty()) emptyList() else books.filter { it.title.contains(q, true) || it.author.orEmpty().contains(q, true) }
-    val matchedAnnotations = if (q.isEmpty()) emptyList() else annotations.filter { it.annotation.selectedText.contains(q, true) || it.annotation.note.contains(q, true) }
+    val matchedBooks = if (q.isEmpty()) emptyList() else books.filter { it.title.contains(q, true) }
     Scaffold(topBar = { TopAppBar(title = { Text("全局搜索") }, navigationIcon = { TextButton(onBack) { Text("返回") } }, actions = { TextButton({ container.searchIndexer.refresh() }) { Text("重建索引") } }) }) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
-            OutlinedTextField(query, { query = it.take(120); limit = 40 }, singleLine = true, placeholder = { Text("搜索书名、作者、正文或摘录") }, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp))
-            Row(Modifier.padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) { listOf("全部", "书籍", "正文", "摘录").forEach { name -> FilterChip(tab == name, { tab = name }, label = { Text(name) }) } }
+            OutlinedTextField(query, { query = it.take(120); limit = 40 }, singleLine = true, placeholder = { Text("搜索名称、小说目录、文档正文") }, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp))
+            Row(Modifier.padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) { listOf("全部", "名称", "目录", "正文").forEach { name -> FilterChip(tab == name, { tab = name; limit = 40 }, label = { Text(name) }) } }
             val pending = states.count { it.status == "INDEXING" }
-            Text(if (pending > 0) "正在建立 $pending 本正文索引…" else "已索引 ${states.count { it.status in setOf("READY", "PARTIAL") }} 本；网页仅搜索缓存正文", Modifier.padding(horizontal = 16.dp), style = MaterialTheme.typography.labelSmall)
+            Text(if (pending > 0) "正在更新 $pending 项搜索索引…" else "已索引 ${states.count { it.status in setOf("READY", "PARTIAL") }} 项；小说仅搜索名称和目录", Modifier.padding(horizontal = 16.dp), style = MaterialTheme.typography.labelSmall)
             val special = states.filter { it.status in setOf("SCAN", "LOCKED", "ERROR", "PARTIAL") }
             if (q.isEmpty()) special.take(4).forEach { s -> Text("${books.firstOrNull { it.id == s.bookId }?.title.orEmpty()}：${s.message}", Modifier.padding(horizontal = 16.dp), style = MaterialTheme.typography.labelSmall) }
             if (busy) LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 8.dp))
             error?.let { Text(it, Modifier.padding(16.dp), color = MaterialTheme.colorScheme.error) }
             LazyColumn(Modifier.weight(1f)) {
-                if (tab in setOf("全部", "书籍")) items(matchedBooks, key = { "book:${it.id}" }) { book -> ListItem(headlineContent = { Text(book.title) }, supportingContent = { Text(book.author.orEmpty()) }, modifier = Modifier.clickable { onOpen(book.id, null) }) }
-                if (tab in setOf("全部", "正文")) items(hits.take(limit), key = { "text:${it.chunk.id}" }) { hit ->
+                if (tab in setOf("全部", "名称")) items(matchedBooks, key = { "book:${it.id}" }) { book -> ListItem(headlineContent = { Text(book.title) }, supportingContent = { Text(book.author.orEmpty()) }, modifier = Modifier.clickable { onOpen(book.id, null) }) }
+                if (tab in setOf("全部", "目录", "正文")) items(hits.take(limit), key = { "text:${it.chunk.id}" }) { hit ->
                     val index = hit.chunk.text.indexOf(q, ignoreCase = true).coerceAtLeast(0)
                     ListItem(headlineContent = { Text("${hit.bookTitle} · ${hit.chunk.location}") }, supportingContent = { Text(hit.chunk.text.substring((index - 35).coerceAtLeast(0), (index + q.length + 80).coerceAtMost(hit.chunk.text.length)), maxLines = 4) }, modifier = Modifier.clickable {
                         val a = JSONObject(hit.chunk.anchorJson)
+                        if (hit.chunk.partKey.startsWith("catalog:")) {
+                            onOpen(hit.chunk.bookId, a.toString())
+                            return@clickable
+                        }
                         val offset = a.optInt("charOffset") + index
                         val quote = hit.chunk.text.substring(index, (index + q.length).coerceAtMost(hit.chunk.text.length))
                         a.put("charOffset", offset).put("quote", quote).put("search", true).put("endBlock", a.optInt("blockIndex")).put("endOffset", offset + quote.length).put("hash", hit.chunk.sourceHash)
                         onOpen(hit.chunk.bookId, a.toString())
                     })
                 }
-                if (tab in setOf("全部", "摘录")) items(matchedAnnotations, key = { "annotation:${it.annotation.id}" }) { item -> ListItem(headlineContent = { Text("${item.bookTitle} · ${item.annotation.location}") }, supportingContent = { Text(item.annotation.note.ifBlank { item.annotation.selectedText }, maxLines = 4) }, modifier = Modifier.clickable { onOpen(item.annotation.bookId, item.annotation.anchorJson) }) }
-                if (hits.size > limit && tab in setOf("全部", "正文")) item { TextButton({ limit += 40 }, Modifier.fillMaxWidth()) { Text("加载更多正文结果") } }
-                if (q.isNotEmpty() && !busy && hits.isEmpty() && matchedBooks.isEmpty() && matchedAnnotations.isEmpty()) item { Text("未找到匹配。未缓存章节与扫描页没有可搜索正文。", Modifier.padding(24.dp)) }
+                if (hits.size > limit && tab in setOf("全部", "目录", "正文")) item { TextButton({ limit += 40 }, Modifier.fillMaxWidth()) { Text("加载更多结果") } }
+                if (q.isNotEmpty() && !busy && (tab == "名称" || hits.isEmpty()) && (tab !in setOf("全部", "名称") || matchedBooks.isEmpty())) item { Text("未找到匹配。小说正文不参与搜索，扫描文档需有文本层。", Modifier.padding(24.dp)) }
             }
         }
     }

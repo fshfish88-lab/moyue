@@ -112,7 +112,8 @@ class V160Instrumentation : Instrumentation() {
         verify(imported is ImportState.Completed, "TXT import works")
         val bookId = (imported as ImportState.Completed).bookId
         try {
-            withTimeout(20000) { while (c.database.searchDao().search(SearchTerms.query("星光入梦"), "星光入梦", 50, 0).none { it.chunk.bookId == bookId }) delay(100) }
+            withTimeout(20000) { while (c.database.searchDao().state(bookId)?.status != "READY") delay(100) }
+            verify(c.database.searchDao().search(SearchTerms.query("星光入梦"), "星光入梦", 50, 0).none { it.chunk.bookId == bookId }, "novel body is excluded from global search")
             val chapters = c.database.chapterDao().forBook(bookId)
             val chapter = com.moyue.reader.feature.reader.RoomReaderDataSource(c.database, c.storage).load(requireNotNull(c.database.bookDao().get(bookId)), chapters.first())
             val i = chapter.blocks.indexOfFirst { blockText(it).contains("明月照天涯") }
@@ -238,12 +239,12 @@ class V160Instrumentation : Instrumentation() {
             click("摘录");waitFor("V160UI原生笔记");click("返回原文",first=true);SystemClock.sleep(1600)
             runOnMainSync {verify(findText(activity.window.decorView)!=null,"excerpt returns to native original")};sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK);waitFor("墨阅")
 
-            val needle="V160正文跳转目标"
-            val bodyHit=runBlocking {withTimeout(20000) {var hit:com.moyue.reader.core.database.SearchHit?=null;while(hit==null){hit=c.database.searchDao().search(SearchTerms.query(needle),needle,20,0).firstOrNull {it.chunk.bookId==bookId};if(hit==null)delay(100)};requireNotNull(hit)}}
+            val catalogTitle = runBlocking { c.database.chapterDao().forBook(bookId).first().title }
+            val catalogHit=runBlocking {withTimeout(20000) {var hit:com.moyue.reader.core.database.SearchHit?=null;while(hit==null){hit=c.database.searchDao().search(SearchTerms.query(catalogTitle),catalogTitle,20,0).firstOrNull {it.chunk.bookId==bookId};if(hit==null)delay(100)};requireNotNull(hit)}}
             click("搜索书籍");waitFor("全局搜索")
-            nodes().first {it.isEditable}.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT,Bundle().apply {putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE,needle.lowercase())})
-            click("正文");click("V160UI文本 · ${bodyHit.chunk.location}");SystemClock.sleep(800)
-            runOnMainSync {verify(checkNotNull(findText(activity.window.decorView,needle)).text.let {it is android.text.Spanned&&it.getSpans(0,it.length,com.moyue.reader.feature.reader.ReaderHighlightSpan::class.java).isNotEmpty()},"global body result jumps and highlights exact source")}
+            nodes().first {it.isEditable}.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT,Bundle().apply {putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE,catalogTitle)})
+            click("目录");click("V160UI文本 · ${catalogHit.chunk.location}");SystemClock.sleep(800)
+            runOnMainSync {verify(findText(activity.window.decorView)!=null,"global catalog result opens its chapter")}
             sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK);waitFor("墨阅")
 
             val mdId=runBlocking {

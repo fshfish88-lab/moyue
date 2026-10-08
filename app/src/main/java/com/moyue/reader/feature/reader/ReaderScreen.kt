@@ -1,7 +1,13 @@
 package com.moyue.reader.feature.reader
 
 import com.moyue.reader.core.ui.MoyueMotion
-import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.ui.layout.layout
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
+import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
@@ -140,24 +146,21 @@ fun ReaderScreen(
             Modifier
                 .fillMaxSize().background(MaterialTheme.colorScheme.background)
                 .then(if(preferences.pageMode==PageMode.SCROLL) Modifier.pointerInput(Unit) {
-                    detectTapGestures { offset ->
-                        if (offset.x in size.width * .25f..size.width * .75f) toggleControls()
-                    }
+                    detectTapGestures { toggleControls() }
                 } else Modifier),
         ) {
             key(state.scrollSession, if (preferences.pageMode == PageMode.SCROLL) 0L else state.chapter.id, preferences.pageMode) {
             if (preferences.pageMode == PageMode.SCROLL) {
-                ScrollingChapter(content, onScrollPosition, onPrefetch, onNext, contentAnnotations, contentSelection)
+                ScrollingChapter(content, onScrollPosition, onPrefetch, onNext, onToggleControls, contentAnnotations, contentSelection)
             } else {
                 PagedChapter(content, onPosition, onPrevious, onNext, onToggleControls, contentAnnotations, contentSelection)
             }
 
             }
 
-            AnimatedVisibility(
+            ReaderToolbar(
                 visible = state.controlsVisible,
-                enter = MoyueMotion.enter(-1),
-                exit = MoyueMotion.exit(-1),
+                edge = -1,
                 modifier = Modifier.align(Alignment.TopCenter),
             ) {
                 TopAppBar(
@@ -185,10 +188,9 @@ fun ReaderScreen(
                 )
             }
 
-            AnimatedVisibility(
+            ReaderToolbar(
                 visible = state.controlsVisible,
-                enter = MoyueMotion.enter(1),
-                exit = MoyueMotion.exit(1),
+                edge = 1,
                 modifier = Modifier.align(Alignment.BottomCenter),
             ) {
                 ReaderControls(
@@ -223,6 +225,29 @@ fun ReaderScreen(
     }
 }
 
+/** Keep the bars composed across taps; animate placement layers, not creation of every button.
+ * Hidden bars are not placed, so they cannot intercept reading gestures or accessibility focus. */
+@Composable
+private fun ReaderToolbar(visible: Boolean, edge: Int, modifier: Modifier, content: @Composable () -> Unit) {
+    val opacity = animateFloatAsState(
+        targetValue = if (visible) 1f else 0f,
+        animationSpec = tween(if (visible) MoyueMotion.Standard else MoyueMotion.Fast, easing = MoyueMotion.Easing),
+        label = "readerToolbar",
+    )
+    Box(modifier
+        .then(if (visible) Modifier else Modifier.clearAndSetSemantics { })
+        .layout { measurable, constraints ->
+            val bar = measurable.measure(constraints)
+            layout(bar.width, bar.height) {
+                if (opacity.value > 0f) bar.placeWithLayer(0, 0) {
+                    alpha = opacity.value
+                    translationY = edge * (bar.height / 8).coerceAtMost(48) * (1f - opacity.value)
+                }
+            }
+        },
+    ) { content() }
+}
+
 private data class ScrollItem(val chapter: com.moyue.reader.core.model.ReaderChapter, val block: Int) {
     val key: String get() = "${chapter.id}:$block"
 }
@@ -239,7 +264,7 @@ private data class ReaderContentState(
 )
 
 @Composable
-private fun ScrollingChapter(state: ReaderContentState, onPosition: (Long, ReaderPosition, Float) -> Unit, onPrefetch: () -> Unit, onNext: () -> Unit,
+private fun ScrollingChapter(state: ReaderContentState, onPosition: (Long, ReaderPosition, Float) -> Unit, onPrefetch: () -> Unit, onNext: () -> Unit, onToggleControls: () -> Unit,
     annotations: List<com.moyue.reader.core.database.AnnotationEntity>, onSelection: (com.moyue.reader.core.model.ReaderChapter, ReaderPosition, ReaderPosition, String) -> Unit) {
     val window = state.scrollWindow.ifEmpty { listOf(state.chapter) }
     val entries = remember(window) { window.flatMap { chapter -> listOf(ScrollItem(chapter, -1)) + chapter.blocks.indices.map { ScrollItem(chapter, it) } } }
@@ -315,6 +340,7 @@ private fun ScrollingChapter(state: ReaderContentState, onPosition: (Long, Reade
                     val text = com.moyue.reader.feature.annotations.blockText(block)
                     AnnotatedReaderText(text, item.chapter, listOf(com.moyue.reader.feature.annotations.TextSegment(0, text.length, item.block, 0)), state.preferences,
                         annotations, Modifier.fillMaxWidth(), indent = state.preferences.indentParagraphs && block is ContentBlock.Text,
+                        onTap = { onToggleControls() },
                         onLayout = { layouts[item.key] = it }, onSelection = onSelection)
                 }
             }
@@ -398,18 +424,42 @@ private fun PagedChapter(state: ReaderContentState, onPosition: (ReaderPosition,
                     else if (state.preferences.autoNextChapter) onNext()
                 }
             }
+            var turnJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
+            val turnPage: (Int) -> Unit = turn@{ direction ->
+                // A new pointer-down interrupts animated scrolling and may snap backwards. Tap turns
+                // settle immediately; dragging keeps the pager's own swipe/fling behavior.
+                if (selecting || pager.isScrollInProgress || turnJob?.isActive == true) return@turn
+                val target = pager.settledPage + direction
+                if (target in pages.indices) {
+                    turnJob = scope.launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+                        pager.scrollToPage(target)
+                    }
+                } else if (direction < 0 && state.canGoPrevious) onPrevious()
+                else if (direction > 0 && state.canGoNext) onNext()
+            }
+            val handleTap: (Float) -> Unit = { fraction ->
+                if (!selecting) when {
+                    fraction < .25f -> turnPage(-1)
+                    fraction > .75f -> turnPage(1)
+                    else -> onToggleControls()
+                }
+            }
+            val hostView = LocalView.current
+            val viewportLeft = remember { floatArrayOf(0f) }
+            val nativeTap: (Float) -> Unit = { screenX ->
+                val origin = IntArray(2)
+                hostView.getLocationOnScreen(origin)
+                handleTap((screenX - origin[0] - viewportLeft[0]) / width)
+            }
+            val latestTap by rememberUpdatedState(handleTap)
             HorizontalPager(
                 state = pager,
                 userScrollEnabled = !selecting,
                 modifier = Modifier.fillMaxWidth().height((maxHeight - footerHeight).coerceAtLeast(1.dp))
+                    .onGloballyPositioned { viewportLeft[0] = it.positionInRoot().x }
                     .pointerInput(pager,state.canGoPrevious,state.canGoNext) {
                         detectTapGestures {offset->
-                            if(selecting) return@detectTapGestures
-                            when {
-                                offset.x<size.width*.25f -> if(pager.currentPage>0)scope.launch {pager.animateScrollToPage(pager.currentPage-1)} else if(state.canGoPrevious)onPrevious()
-                                offset.x>size.width*.75f -> if(pager.currentPage<pages.lastIndex)scope.launch {pager.animateScrollToPage(pager.currentPage+1)} else if(state.canGoNext)onNext()
-                                else->onToggleControls()
-                            }
+                            latestTap(offset.x / size.width.coerceAtLeast(1))
                         }
                     },
             ) { page ->
@@ -418,7 +468,7 @@ private fun PagedChapter(state: ReaderContentState, onPosition: (ReaderPosition,
                         ReaderImage(requireNotNull(pages[page].image), paged = true)
                     } else {
                     AnnotatedReaderText(pages[page].text.trimEnd('\n'), state.chapter, pages[page].segments, state.preferences,
-                        annotations, Modifier.fillMaxSize(), onSelecting = { selecting = it }, onSelection = onSelection)
+                        annotations, Modifier.fillMaxSize(), onTap = nativeTap, onSelecting = { selecting = it }, onSelection = onSelection)
                     }
                 }
                 else Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -432,7 +482,7 @@ private fun PagedChapter(state: ReaderContentState, onPosition: (ReaderPosition,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 IconButton(
-                    onClick = { if(pager.currentPage>0)scope.launch { pager.animateScrollToPage(pager.currentPage - 1) } else if(state.canGoPrevious)onPrevious() },
+                    onClick = { turnPage(-1) },
                     enabled = pager.currentPage > 0 || state.canGoPrevious,
                 ) {
                     Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, contentDescription = "上一页")
@@ -445,10 +495,7 @@ private fun PagedChapter(state: ReaderContentState, onPosition: (ReaderPosition,
                     modifier = Modifier.weight(1f),
                 )
                 IconButton(
-                    onClick = {
-                        if (pager.currentPage < pages.lastIndex) scope.launch { pager.animateScrollToPage(pager.currentPage + 1) }
-                        else if (state.canGoNext) onNext()
-                    },
+                    onClick = { turnPage(1) },
                 ) {
                     Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = "下一页")
                 }

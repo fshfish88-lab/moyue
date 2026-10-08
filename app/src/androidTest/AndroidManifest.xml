@@ -9,4 +9,5 @@
     <instrumentation android:name="com.moyue.reader.feature.reader.WebReaderSmokeInstrumentation" android:targetPackage="com.moyue.reader" />
     <instrumentation android:name="com.moyue.reader.feature.update.UpdateSmokeInstrumentation" android:targetPackage="com.moyue.reader" />
     <instrumentation android:name="com.moyue.reader.feature.reader.WebLiveInstrumentation" android:targetPackage="com.moyue.reader" />
+    <instrumentation android:name="com.moyue.reader.feature.annotations.SearchScopeInstrumentation" android:targetPackage="com.moyue.reader" />
 </manifest>

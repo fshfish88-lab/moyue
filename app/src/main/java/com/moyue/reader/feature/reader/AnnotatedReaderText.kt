@@ -24,11 +24,13 @@ import org.json.JSONObject
 @android.annotation.SuppressLint("InlinedApi")
 internal fun AnnotatedReaderText(text: String, chapter: ReaderChapter, segments: List<TextSegment>, preferences: ReaderPreferences,
     annotations: List<AnnotationEntity>, modifier: Modifier, indent: Boolean = false,
+    onTap: (Float) -> Unit = {},
     onLayout: (android.text.Layout) -> Unit = {}, onSelecting: (Boolean) -> Unit = {},
     onSelection: (ReaderChapter, ReaderPosition, ReaderPosition, String) -> Unit) {
     val density = LocalDensity.current
     val fontPx = with(density) { preferences.fontSizeSp.sp.toPx() }
     val ink = MaterialTheme.colorScheme.onBackground.toArgb()
+    val tapCallback by rememberUpdatedState(onTap)
     val selectedCallback by rememberUpdatedState(onSelection)
     val selectingCallback by rememberUpdatedState(onSelecting)
     val layoutCallback by rememberUpdatedState(onLayout)
@@ -64,6 +66,7 @@ internal fun AnnotatedReaderText(text: String, chapter: ReaderChapter, segments:
         breakStrategy = android.graphics.text.LineBreaker.BREAK_STRATEGY_SIMPLE
         hyphenationFrequency = android.text.Layout.HYPHENATION_FREQUENCY_NONE
         setTextIsSelectable(true)
+        onReaderTap = { tapCallback(it) }
         onTextLayout = { layoutCallback(it) }
         customSelectionActionModeCallback = object : ActionMode.Callback {
             override fun onCreateActionMode(mode: ActionMode?, menu: Menu?): Boolean {

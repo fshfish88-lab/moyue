@@ -28,6 +28,9 @@ interface BookDao {
 
 @Dao
 interface ChapterDao {
+    @Query("SELECT * FROM chapters ORDER BY id")
+    fun observeCatalog(): Flow<List<ChapterEntity>>
+
     @Update suspend fun update(chapter: ChapterEntity)
 
     @Query("SELECT * FROM chapters WHERE bookId = :bookId ORDER BY chapterIndex")

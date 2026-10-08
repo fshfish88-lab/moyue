@@ -50,8 +50,8 @@ interface SearchDao {
     @Query("DELETE FROM search_fts WHERE rowid IN (SELECT id FROM search_chunks WHERE bookId=:bookId)") suspend fun deleteBookTerms(bookId: Long)
     @Query("DELETE FROM search_chunks WHERE bookId=:bookId") suspend fun deleteBook(bookId: Long)
     @Query("DELETE FROM search_fts WHERE rowid NOT IN (SELECT id FROM search_chunks)") suspend fun prune()
-    @Query("SELECT c.*, b.title AS bookTitle FROM search_chunks c JOIN search_fts f ON f.rowid=c.id JOIN books b ON b.id=c.bookId WHERE search_fts MATCH :terms AND instr(lower(c.text), lower(:query))>0 ORDER BY b.title, c.id LIMIT :limit OFFSET :offset")
-    suspend fun search(terms: String, query: String, limit: Int, offset: Int): List<SearchHit>
+    @Query("SELECT c.*, b.title AS bookTitle FROM search_chunks c JOIN search_fts f ON f.rowid=c.id JOIN books b ON b.id=c.bookId WHERE search_fts MATCH :terms AND ((b.sourceType IN ('TXT','EPUB','WEB') AND c.partKey LIKE 'catalog:%') OR (b.sourceType IN ('MARKDOWN','DOCUMENT') AND c.partKey NOT LIKE 'chapter:%')) AND (:scope='ALL' OR (:scope='CATALOG' AND c.partKey LIKE 'catalog:%') OR (:scope='BODY' AND b.sourceType IN ('MARKDOWN','DOCUMENT'))) AND instr(lower(c.text), lower(:query))>0 ORDER BY b.title, c.id LIMIT :limit OFFSET :offset")
+    suspend fun search(terms: String, query: String, limit: Int, offset: Int, scope: String = "ALL"): List<SearchHit>
     @Query("SELECT * FROM search_states ORDER BY bookId") fun observeStates(): Flow<List<SearchStateEntity>>
     @Query("SELECT * FROM search_states WHERE bookId=:bookId") suspend fun state(bookId: Long): SearchStateEntity?
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun state(value: SearchStateEntity)

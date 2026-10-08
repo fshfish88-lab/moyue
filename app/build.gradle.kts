@@ -15,9 +15,9 @@ android {
         applicationId = "com.moyue.reader"
         minSdk = 26
         targetSdk = 36
-        versionCode = 25
-        // V1.6.2: isolate reader content from toolbar visibility.
-        versionName = "1.6.2"
+        versionCode = 26
+        // V1.6.3: forward body taps without interfering with native text selection.
+        versionName = "1.6.3"
         testInstrumentationRunner = "com.moyue.reader.feature.annotations.V160Instrumentation"
     }
 
