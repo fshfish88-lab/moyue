@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="108" height="108" viewBox="0 0 108 108" role="img" aria-labelledby="title">
+  <title id="title">墨阅</title>
+  <!-- Reuses the application's launcher artwork and colors. -->
+  <rect width="108" height="108" rx="24" fill="#F7F7F5"/>
+  <path fill="#5C6B58" d="M25,27c11,-2 20,1 29,8v49c-8,-6 -17,-9 -29,-7zM83,27c-11,-2 -20,1 -29,8v49c8,-6 17,-9 29,-7z"/>
+  <path fill="#F7F7F5" d="M31,38h17v3h-17zM31,47h17v3h-17zM60,38h17v3h-17zM60,47h17v3h-17z"/>
+</svg>
