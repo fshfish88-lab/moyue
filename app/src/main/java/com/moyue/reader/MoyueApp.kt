@@ -61,6 +61,8 @@ private sealed interface AppScreen {
 @Composable
 fun MoyueApp(container: MoyueContainer, sharedUrl: String? = null, shareReceiver: com.moyue.reader.feature.importbook.ShareReceiverViewModel? = null) {
     val books by container.database.bookDao().observeAll().collectAsState(initial = emptyList())
+    val shelfLibrary by container.shelves.library.collectAsState(initial = com.moyue.reader.feature.bookshelf.ShelfLibrary())
+    val shelfPreferences by container.shelfPreferences.preferences.collectAsState(initial = com.moyue.reader.feature.bookshelf.ShelfPreferences())
     val preferences by container.preferences.preferences.collectAsState(initial = ReaderPreferences())
     val updateState by container.updates.state.collectAsState()
     val scope = rememberCoroutineScope()
@@ -127,6 +129,20 @@ fun MoyueApp(container: MoyueContainer, sharedUrl: String? = null, shareReceiver
         when (destination) {
             AppScreen.Shelf -> BookshelfScreen(
                 books = books,
+                library = shelfLibrary,
+                preferences = shelfPreferences,
+                repository = container.shelves,
+                onPreferences = { transform -> scope.launch { runCatching { container.shelfPreferences.update(transform) }.onFailure { snackbar.showSnackbar("偏好保存失败，请重试") } } },
+                onMessage = { message -> scope.launch { snackbar.showSnackbar(message) } },
+                onDeleteBooks = { ids ->
+                    val removed = mutableSetOf<Long>()
+                    for (id in ids) {
+                        try { deleteShelfBook(container, id); removed.add(id) }
+                        catch (e: Exception) { if (e is kotlinx.coroutines.CancellationException) throw e }
+                    }
+                    snackbar.showSnackbar(if (removed.size == ids.size) "已删除 ${removed.size} 本书籍" else "已删除 ${removed.size} 本，${ids.size - removed.size} 本删除失败，可重试")
+                    removed
+                },
                 onOpenBook = { openContent(it) },
                 onEditMarkdown = { openContent(it, true) },
                 onBookDetails = { screen = AppScreen.Detail(it) },
@@ -134,13 +150,6 @@ fun MoyueApp(container: MoyueContainer, sharedUrl: String? = null, shareReceiver
                 onSettings = { screen = AppScreen.Settings },
                 onGlobalSearch = { screen = AppScreen.Search },
                 onAnnotations = { screen = AppScreen.Annotations },
-                onDeleteBook = { id ->
-                    scope.launch {
-                        runCatching { deleteShelfBook(container, id) }
-                            .onSuccess { snackbar.showSnackbar("书籍已删除") }
-                            .onFailure { snackbar.showSnackbar("删除失败，请重试") }
-                    }
-                },
             )
             AppScreen.Annotations -> com.moyue.reader.feature.annotations.AnnotationCenter(container, { screen = AppScreen.Shelf }, { id, anchor -> openContent(id, anchor = anchor) })
             AppScreen.Search -> com.moyue.reader.feature.annotations.GlobalSearch(container, { screen = AppScreen.Shelf }, { id, anchor -> openContent(id, anchor = anchor) })

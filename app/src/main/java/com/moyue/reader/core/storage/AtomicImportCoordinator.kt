@@ -182,6 +182,7 @@ class RoomAtomicImportStore(
                     progress = 0f,
                 )
                 val bookId = bookDao.insert(draft)
+                database.shelfDao().initializeMissing()
                 val destination = storage.bookDirectory(bookId)
                 if (!destination.mkdirs()) throw IOException("无法创建书籍目录")
                 publishedDirectory = destination

@@ -74,9 +74,9 @@ class V160Instrumentation : Instrumentation() {
             old.execSQL("INSERT INTO document_bookmarks VALUES(7,2,'{\"pageIndex\":4,\"left\":10,\"top\":20,\"scale\":\"1.5\"}','第5页',789)")
             old.version = 2
         } finally { old.close() }
-        val migrated = Room.databaseBuilder(targetContext, MoyueDatabase::class.java, name).addMigrations(MoyueDatabase.MIGRATION_1_2, MoyueDatabase.MIGRATION_2_3).build()
+        val migrated = Room.databaseBuilder(targetContext, MoyueDatabase::class.java, name).addMigrations(MoyueDatabase.MIGRATION_1_2, MoyueDatabase.MIGRATION_2_3, MoyueDatabase.MIGRATION_3_4).build()
         try {
-            verify(migrated.openHelper.readableDatabase.version == 3, "real schema2 migrates to validated schema3")
+            verify(migrated.openHelper.readableDatabase.version == 4, "real schema2 migrates to validated schema4")
             verify(migrated.bookDao().get(1)?.title == "迁移旧书", "old book retained")
             verify(migrated.readingProgressDao().get(1)?.charOffset == 6, "old reading position retained")
             verify(migrated.documentDao().bookmarks(2).first().single().createdAt == 789L, "legacy bookmark retained")

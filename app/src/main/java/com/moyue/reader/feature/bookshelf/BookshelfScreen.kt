@@ -6,8 +6,11 @@ import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
+import kotlinx.coroutines.launch
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -76,226 +79,213 @@ import com.moyue.reader.core.ui.MoyueWordmark
 import java.text.DateFormat
 import java.util.Date
 
-enum class ShelfFilter { ALL, RECENT, FINISHED, MARKDOWN, DOCUMENT, VISUAL }
+private data class CategoryEditor(val tag: Boolean, val id: Long?, val name: String = "")
+private data class CategoryDeletion(val tag: Boolean, val id: Long, val name: String)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun BookshelfScreen(
     books: List<BookEntity>,
+    library: ShelfLibrary,
+    preferences: ShelfPreferences,
+    repository: ShelfRepository,
+    onPreferences: ((ShelfPreferences) -> ShelfPreferences) -> Unit,
+    onMessage: (String) -> Unit,
+    onDeleteBooks: suspend (Set<Long>) -> Set<Long>,
     onOpenBook: (Long) -> Unit,
     onBookDetails: (Long) -> Unit,
     onAddBook: () -> Unit,
     onSettings: () -> Unit,
-    onDeleteBook: (Long) -> Unit,
     onEditMarkdown: (Long) -> Unit = onOpenBook,
     onGlobalSearch: (() -> Unit)? = null,
     onAnnotations: () -> Unit = {},
 ) {
-    var pendingDelete by remember { mutableStateOf<BookEntity?>(null) }
-    var actionSheet by remember { mutableStateOf<BookEntity?>(null) }
-
-    pendingDelete?.let { book ->
-        AlertDialog(
-            onDismissRequest = { pendingDelete = null },
-            containerColor = MaterialTheme.colorScheme.surface,
-            title = { Text("删除《${book.title}》？") },
-            text = { Text("将删除应用内的书籍副本、缓存和阅读进度。原始导入文件不受影响。") },
-            dismissButton = { TextButton(onClick = { pendingDelete = null }) { Text("取消") } },
-            confirmButton = {
-                TextButton(onClick = { pendingDelete = null; onDeleteBook(book.id) }) {
-                    Text("确认删除", color = MaterialTheme.colorScheme.error)
-                }
-            },
-        )
-    }
-
-    // Long-press actions. Destructive management no longer occupies a slot under every cover.
-    actionSheet?.let { book ->
-        ModalBottomSheet(
-            onDismissRequest = { actionSheet = null },
-            containerColor = MaterialTheme.colorScheme.background,
-            tonalElevation = 0.dp,
-        ) {
-            Column(Modifier.padding(bottom = 24.dp)) {
-                Text(
-                    book.title,
-                    style = MaterialTheme.typography.titleMedium,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.padding(horizontal = MoyueSpacing.Page, vertical = MoyueSpacing.Tight),
-                )
-                HorizontalDivider(Modifier.padding(vertical = MoyueSpacing.Tight), color = MaterialTheme.colorScheme.outlineVariant)
-                ListItem(
-                    headlineContent = { Text("书籍详情") },
-                    supportingContent = { Text("格式信息与阅读记录") },
-                    leadingContent = { Icon(Icons.Default.Info, contentDescription = null) },
-                    colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-                    modifier = Modifier.clickable { actionSheet = null; onBookDetails(book.id) },
-                )
-                if (book.sourceType == com.moyue.reader.core.model.SourceType.MARKDOWN) {
-                    ListItem(headlineContent = { Text("编辑 Markdown") }, supportingContent = { Text("编辑应用内副本，保存与导出") },
-                        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-                        modifier = Modifier.clickable { actionSheet = null; onEditMarkdown(book.id) })
-                }
-                ListItem(
-                    headlineContent = { Text("删除书籍", color = MaterialTheme.colorScheme.error) },
-                    supportingContent = { Text("同时清除阅读进度与缓存") },
-                    leadingContent = { Icon(Icons.Default.Delete, contentDescription = null, tint = MaterialTheme.colorScheme.error) },
-                    colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-                    modifier = Modifier.clickable { actionSheet = null; pendingDelete = book },
-                )
-            }
-        }
-    }
-
+    var actionSheet by remember { mutableStateOf<Long?>(null) }
+    var pendingDelete by remember { mutableStateOf<Set<Long>?>(null) }
+    var selecting by remember { mutableStateOf(false) }
+    var selected by remember { mutableStateOf<Set<Long>>(emptySet()) }
+    var busy by remember { mutableStateOf(false) }
+    var collectionMenu by remember { mutableStateOf(false) }
+    var sortDialog by remember { mutableStateOf(false) }
+    var filterDialog by remember { mutableStateOf(false) }
+    var statusTargets by remember { mutableStateOf<Set<Long>?>(null) }
+    var assignment by remember { mutableStateOf<Pair<Boolean, Set<Long>>?>(null) }
+    var catalog by remember { mutableStateOf<Boolean?>(null) }
+    var editor by remember { mutableStateOf<CategoryEditor?>(null) }
+    var categoryDelete by remember { mutableStateOf<CategoryDeletion?>(null) }
+    var seriesBook by remember { mutableStateOf<Long?>(null) }
     var query by remember { mutableStateOf("") }
-    var filter by remember { mutableStateOf(ShelfFilter.ALL) }
     var searchVisible by remember { mutableStateOf(false) }
-    val focus=LocalFocusManager.current
-    val keyboard=LocalSoftwareKeyboardController.current
-    fun closeSearch() { searchVisible=false; query=""; focus.clearFocus(); keyboard?.hide() }
-    BackHandler(enabled=searchVisible && actionSheet==null && pendingDelete==null) { closeSearch() }
-    val visible = books.filter { book ->
-        val matchesQuery = query.isBlank() || book.title.contains(query, true) || book.author.orEmpty().contains(query, true)
-        val matchesFilter = when (filter) {
-            ShelfFilter.ALL -> true
-            ShelfFilter.RECENT -> book.lastReadAt != null
-            ShelfFilter.FINISHED -> book.progress >= .999f
-            ShelfFilter.MARKDOWN -> book.sourceType == com.moyue.reader.core.model.SourceType.MARKDOWN
-            ShelfFilter.DOCUMENT -> book.sourceType == com.moyue.reader.core.model.SourceType.DOCUMENT && !isVisual(book)
-            ShelfFilter.VISUAL -> isVisual(book)
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    val focus = LocalFocusManager.current
+    val keyboard = LocalSoftwareKeyboardController.current
+    fun perform(action: suspend () -> Unit, done: () -> Unit = {}) {
+        if (busy) return
+        busy = true
+        scope.launch {
+            try { action(); done() } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                onMessage(e.message?.takeIf { it.length < 120 } ?: "操作失败，请重试")
+            } finally { busy = false }
         }
-        matchesQuery && matchesFilter
     }
+    fun closeSearch() { searchVisible = false; query = ""; focus.clearFocus(); keyboard?.hide() }
+    fun exitSelection() { selecting = false; selected = emptySet() }
+    androidx.compose.runtime.LaunchedEffect(books.map { it.id }) { selected = selected.intersect(books.map { it.id }.toSet()) }
+    BackHandler(enabled = selecting && !busy && pendingDelete == null && assignment == null && statusTargets == null) { exitSelection() }
+    BackHandler(enabled = searchVisible && !selecting && actionSheet == null) { closeSearch() }
+    val effective = preferences.copy(
+        shelfId = preferences.shelfId?.takeIf { id -> library.shelves.any { it.id == id } },
+        tagIds = preferences.tagIds.intersect(library.tags.map { it.id }.toSet()),
+    )
+    val visible = shelfBooks(library.books, effective, query)
     val recent = books.maxByOrNull { it.lastReadAt ?: Long.MIN_VALUE }?.takeIf { it.lastReadAt != null }
+    fun toggle(id: Long) { selected = if (id in selected) selected - id else selected + id }
+    val collection = effective.shelfId?.let { id -> library.shelves.firstOrNull { it.id == id }?.name } ?: "全部书籍"
+    val collectionLabel = if (effective.favoritesOnly) { if (effective.shelfId == null) "收藏" else "$collection · 收藏" } else collection
 
-    Scaffold(
-        containerColor = MaterialTheme.colorScheme.background,
-        topBar = {
-            TopAppBar(
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
-                title = { Text("墨阅", style = MoyueWordmark) },
-                actions = {
-                    IconButton(onClick = { if(onGlobalSearch != null) onGlobalSearch() else if(searchVisible) closeSearch() else searchVisible=true }) {
-                        Icon(
-                            if (searchVisible) Icons.Default.Close else Icons.Default.Search,
-                            contentDescription = if (searchVisible) "关闭搜索" else "搜索书籍",
-                        )
-                    }
-                },
-            )
-        },
-        floatingActionButton = {
-            ExtendedFloatingActionButton(
-                onClick = onAddBook,
-                containerColor = MaterialTheme.colorScheme.primary,
-                contentColor = MaterialTheme.colorScheme.onPrimary,
-                icon = { Icon(Icons.Default.Add, contentDescription = null) },
-                text = { Text("添加内容") },
-            )
-        },
-        bottomBar = {
-            NavigationBar(containerColor = MaterialTheme.colorScheme.background, tonalElevation = 0.dp) {
-                NavigationBarItem(
-                    selected = true,
-                    onClick = {},
-                    icon = { Icon(Icons.Default.Home, contentDescription = null) },
-                    label = { Text("书架") },
-                )
-                NavigationBarItem(
-                    selected = false,
-                    onClick = onAnnotations,
-                    icon = { Icon(Icons.Default.Home, contentDescription = null) },
-                    label = { Text("摘录") },
-                )
-                NavigationBarItem(
-                    selected = false,
-                    onClick = onSettings,
-                    icon = { Icon(Icons.Default.Settings, contentDescription = null) },
-                    label = { Text("设置") },
-                )
-            }
-        },
-    ) { padding ->
-        Column(Modifier.fillMaxSize().padding(padding)) {
-            AnimatedVisibility(searchVisible, enter = MoyueMotion.expand(), exit = MoyueMotion.collapse()) {
-                TextField(
-                    value = query,
-                    onValueChange = { query = it },
-                    placeholder = { Text("搜索书名或作者") },
-                    singleLine = true,
-                    colors = TextFieldDefaults.colors(
-                        focusedContainerColor = MaterialTheme.colorScheme.surface,
-                        unfocusedContainerColor = MaterialTheme.colorScheme.surface,
-                        focusedIndicatorColor = MaterialTheme.colorScheme.primary,
-                        unfocusedIndicatorColor = MaterialTheme.colorScheme.outlineVariant,
-                    ),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = MoyueSpacing.Page, vertical = MoyueSpacing.Tight),
-                )
-            }
-            if (books.isEmpty()) {
-                EmptyShelf(Modifier.weight(1f), onAddBook)
-            } else {
-                recent?.let { ContinueReadingCard(it, onOpenBook) }
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .padding(start = MoyueSpacing.Page, end = MoyueSpacing.Page, top = MoyueSpacing.Section, bottom = MoyueSpacing.Micro),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text("我的书架", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Spacer(Modifier.weight(1f))
-                    Text("共 ${books.size} 本", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    pendingDelete?.let { ids ->
+        val targets = books.filter { it.id in ids }
+        AlertDialog(onDismissRequest = { if (!busy) pendingDelete = null },
+            title = { Text(if (targets.size == 1) "删除《${targets.first().title}》？" else "删除 ${targets.size} 本书籍？") },
+            text = { Column { Text(targets.take(4).joinToString("、") { it.title } + if (targets.size > 4) " 等" else "")
+                Text("将删除应用内副本、缓存、阅读进度和标注，原始导入文件不受影响。此操作无法撤销。", Modifier.padding(top = 12.dp)) } },
+            dismissButton = { TextButton(enabled = !busy, onClick = { pendingDelete = null }) { Text("取消") } },
+            confirmButton = { TextButton(enabled = !busy && targets.isNotEmpty(), onClick = {
+                perform({ val removed = onDeleteBooks(ids); selected = selected - removed }, { pendingDelete = null; if (selected.isEmpty()) selecting = false })
+            }) { Text(if (busy) "删除中…" else "确认删除", color = MaterialTheme.colorScheme.error) } })
+    }
+    actionSheet?.let { id -> library.books.firstOrNull { it.book.id == id }?.let { item ->
+        val book = item.book
+        ModalBottomSheet(onDismissRequest = { if (!busy) actionSheet = null }, containerColor = MaterialTheme.colorScheme.background, tonalElevation = 0.dp) {
+            Column(Modifier.padding(bottom = 24.dp).verticalScroll(rememberScrollState())) {
+                Text(book.title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(horizontal = 24.dp))
+                ShelfAction(if (item.management.firstOrNull()?.favorite == true) "取消收藏" else "收藏书籍", !busy) {
+                    perform({ repository.favorite(setOf(id), item.management.firstOrNull()?.favorite != true) }, { actionSheet = null })
                 }
-                Row(
-                    Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())
-                        .padding(horizontal = MoyueSpacing.Page, vertical = MoyueSpacing.Tight),
-                    horizontalArrangement = Arrangement.spacedBy(MoyueSpacing.Tight),
-                ) {
-                    ShelfFilter.entries.forEach { item ->
-                        FilterChip(
-                            selected = filter == item,
-                            onClick = { filter = item },
-                            label = { Text(item.label, maxLines = 1, softWrap = false) },
-                        )
-                    }
-                }
-                if (visible.isEmpty()) {
-                    Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                        Text(
-                            "没有匹配的书籍",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
+                ShelfAction("阅读状态 · ${item.status.label}") { actionSheet = null; statusTargets = setOf(id) }
+                ShelfAction("加入书架", supporting = item.shelves.joinToString("、") { it.name }.ifBlank { "一本书可属于多个书架" }) { actionSheet = null; assignment = false to setOf(id) }
+                ShelfAction("标签管理", supporting = item.tags.joinToString("、") { it.name }.ifBlank { "新增或移除多个标签" }) { actionSheet = null; assignment = true to setOf(id) }
+                ShelfAction("系列信息", supporting = item.management.firstOrNull()?.series ?: "可随时补录") { actionSheet = null; seriesBook = id }
+                ShelfAction("多选管理") { actionSheet = null; selecting = true; selected = setOf(id) }
+                HorizontalDivider()
+                ShelfAction("书籍详情") { actionSheet = null; onBookDetails(id) }
+                if (book.sourceType == com.moyue.reader.core.model.SourceType.MARKDOWN) ShelfAction("编辑 Markdown") { actionSheet = null; onEditMarkdown(id) }
+                ShelfAction("删除书籍", destructive = true) { actionSheet = null; pendingDelete = setOf(id) }
+            }
+        }
+    } }
+    if (sortDialog) ShelfChoiceDialog("排序方式", ShelfSort.entries.map { it to it.label }, effective.sort, { sortDialog = false }) { value ->
+        onPreferences { it.copy(sort = value) }; sortDialog = false
+    }
+    statusTargets?.let { ids -> ShelfChoiceDialog("设置阅读状态", ReadingStatus.entries.map { it to it.label },
+        library.books.filter { it.book.id in ids }.map { it.status }.distinct().singleOrNull(), { statusTargets = null }) { value ->
+        perform({ repository.status(ids, value) }, { statusTargets = null })
+    } }
+    if (filterDialog) ShelfFilterDialog(effective, library, { filterDialog = false }) { draft -> onPreferences { draft }; filterDialog = false }
+    assignment?.let { (tag, ids) -> ShelfAssignmentDialog(tag, ids, library, busy, { assignment = null }, { editor = CategoryEditor(tag, null) }) { add, remove ->
+        perform({ repository.categories(ids, tag, add, remove) }, { assignment = null })
+    } }
+    catalog?.let { tag -> ShelfCatalogDialog(tag, library, busy, { catalog = null }, { editor = CategoryEditor(tag, null) },
+        { id, name -> editor = CategoryEditor(tag, id, name) }, { id, name -> categoryDelete = CategoryDeletion(tag, id, name) }) }
+    editor?.let { value -> ShelfNameDialog(if (value.id == null) "新建${if (value.tag) "标签" else "书架"}" else "重命名", value.name, busy, { editor = null }) { name ->
+        perform({ repository.saveCategory(value.tag, value.id, name) }, { editor = null })
+    } }
+    seriesBook?.let { id -> ShelfNameDialog("系列信息", library.books.firstOrNull { it.book.id == id }?.management?.firstOrNull()?.series.orEmpty(), busy,
+        { seriesBook = null }, allowEmpty = true, onSave = { value -> perform({ repository.series(id, value) }, { seriesBook = null }) }) }
+    categoryDelete?.let { value -> AlertDialog(onDismissRequest = { if (!busy) categoryDelete = null }, title = { Text("删除分类“${value.name}”？") },
+        text = { Text("仅移除分类及其关联。书籍、阅读进度和标注全部保留。") }, dismissButton = { TextButton(enabled = !busy, onClick = { categoryDelete = null }) { Text("取消") } },
+        confirmButton = { TextButton(enabled = !busy, onClick = { perform({ repository.deleteCategory(value.tag, value.id) }, { categoryDelete = null }) }) { Text("删除分类") } }) }
+
+    Scaffold(containerColor = MaterialTheme.colorScheme.background,
+        topBar = { TopAppBar(colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
+            title = { Text(if (selecting) "已选 ${selected.size} 本" else "墨阅", style = if (selecting) MaterialTheme.typography.titleMedium else MoyueWordmark) },
+            actions = {
+                if (selecting) {
+                    TextButton(enabled = !busy, onClick = { selected = if (visible.isNotEmpty() && visible.all { it.book.id in selected }) selected - visible.map { it.book.id }.toSet() else selected + visible.map { it.book.id } }) { Text("全选") }
+                    TextButton(enabled = !busy, onClick = { exitSelection() }) { Text("完成") }
                 } else {
-                    LazyVerticalGrid(
-                        columns = GridCells.Fixed(3),
-                        modifier = Modifier.weight(1f),
-                        contentPadding = PaddingValues(
-                            start = MoyueSpacing.Page,
-                            end = MoyueSpacing.Page,
-                            top = MoyueSpacing.Micro,
-                            bottom = 96.dp,
-                        ),
-                        horizontalArrangement = Arrangement.spacedBy(MoyueSpacing.Item),
-                        verticalArrangement = Arrangement.spacedBy(MoyueSpacing.Section),
-                    ) {
-                        items(visible, key = BookEntity::id) { book ->
-                            BookTile(
-                                book = book,
-                                modifier = Modifier.animateItem(fadeInSpec = tween(MoyueMotion.Standard), placementSpec = tween(MoyueMotion.Standard, easing = MoyueMotion.Easing), fadeOutSpec = tween(MoyueMotion.Fast)),
-                                onOpen = { onOpenBook(book.id) },
-                                onLongPress = { actionSheet = book },
-                            )
-                        }
+                    TextButton(onClick = { selecting = true }) { Text("多选") }
+                    IconButton(onClick = { if (onGlobalSearch != null) onGlobalSearch() else if (searchVisible) closeSearch() else searchVisible = true }) {
+                        Icon(if (searchVisible) Icons.Default.Close else Icons.Default.Search, contentDescription = if (searchVisible) "关闭搜索" else "搜索书籍")
                     }
+                }
+            }) },
+        floatingActionButton = { if (!selecting) ExtendedFloatingActionButton(onClick = onAddBook, containerColor = MaterialTheme.colorScheme.primary,
+            icon = { Icon(Icons.Default.Add, null) }, text = { Text("添加内容") }) },
+        bottomBar = {
+            if (selecting) Column(Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 8.dp)) {
+                val enabled = selected.isNotEmpty() && !busy
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                    TextButton(enabled = enabled, onClick = { perform({ repository.favorite(selected, true) }) }) { Text("收藏") }
+                    TextButton(enabled = enabled, onClick = { perform({ repository.favorite(selected, false) }) }) { Text("取消收藏") }
+                    TextButton(enabled = enabled, onClick = { statusTargets = selected.toSet() }) { Text("状态") }
+                }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                    TextButton(enabled = enabled, onClick = { assignment = false to selected.toSet() }) { Text("书架") }
+                    TextButton(enabled = enabled, onClick = { assignment = true to selected.toSet() }) { Text("标签") }
+                    TextButton(enabled = enabled, onClick = { pendingDelete = selected.toSet() }) { Text("删除", color = MaterialTheme.colorScheme.error) }
+                }
+            } else NavigationBar(containerColor = MaterialTheme.colorScheme.background, tonalElevation = 0.dp) {
+                NavigationBarItem(true, {}, { Icon(Icons.Default.Home, null) }, label = { Text("书架") })
+                NavigationBarItem(false, onAnnotations, { Icon(Icons.Default.Home, null) }, label = { Text("摘录") })
+                NavigationBarItem(false, onSettings, { Icon(Icons.Default.Settings, null) }, label = { Text("设置") })
+            }
+        }) { padding ->
+        Column(Modifier.fillMaxSize().padding(padding)) {
+            AnimatedVisibility(searchVisible) { TextField(query, { query = it }, placeholder = { Text("搜索书名或作者") }, singleLine = true, modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp)) }
+            if (!selecting) recent?.let { ContinueReadingCard(it, onOpenBook) }
+            Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.weight(1f)) {
+                    TextButton(enabled = !selecting && !busy, onClick = { collectionMenu = true }) { Text("$collectionLabel ▾", maxLines = 1, overflow = TextOverflow.Ellipsis) }
+                    androidx.compose.material3.DropdownMenu(collectionMenu, { collectionMenu = false }) {
+                        androidx.compose.material3.DropdownMenuItem(text = { Text("全部书籍") }, onClick = { onPreferences { it.copy(shelfId = null) }; collectionMenu = false })
+                        library.shelves.forEach { shelf -> androidx.compose.material3.DropdownMenuItem(text = { Text(shelf.name) }, onClick = { onPreferences { it.copy(shelfId = shelf.id) }; collectionMenu = false }) }
+                        HorizontalDivider()
+                        androidx.compose.material3.DropdownMenuItem(text = { Text("管理书架") }, onClick = { collectionMenu = false; catalog = false })
+                        androidx.compose.material3.DropdownMenuItem(text = { Text("管理标签") }, onClick = { collectionMenu = false; catalog = true })
+                    }
+                }
+                TextButton(enabled = !selecting, onClick = { sortDialog = true }) { Text("${effective.sort.label} ▾", style = MaterialTheme.typography.labelMedium) }
+                val filterCount = effective.formats.size + effective.authors.size + effective.tagIds.size
+                TextButton(enabled = !selecting, onClick = { filterDialog = true }) { Text(if (filterCount == 0) "筛选" else "筛选($filterCount)") }
+            }
+            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 24.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilterChip(selected = effective.status == null, enabled = !selecting, onClick = { onPreferences { it.copy(status = null) } }, label = { Text("全部状态") })
+                ReadingStatus.entries.forEach { value -> FilterChip(selected = effective.status == value, enabled = !selecting, onClick = { onPreferences { it.copy(status = if (it.status == value) null else value) } }, label = { Text(value.label) }) }
+                FilterChip(selected = effective.favoritesOnly, enabled = !selecting, onClick = { onPreferences { it.copy(favoritesOnly = !it.favoritesOnly) } }, label = { Text("收藏") })
+            }
+            Row(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 8.dp)) {
+                Text("我的书架", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Spacer(Modifier.weight(1f))
+                Text("${visible.size} / ${books.size} 本", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            if (books.isEmpty()) EmptyShelf(Modifier.weight(1f), onAddBook)
+            else if (visible.isEmpty()) Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("没有匹配的书籍")
+                    TextButton(enabled = !selecting, onClick = { onPreferences { ShelfPreferences(sort = it.sort) }; query = "" }) { Text("清除筛选") }
+                }
+            } else LazyVerticalGrid(columns = GridCells.Fixed(3), modifier = Modifier.weight(1f),
+                contentPadding = PaddingValues(start = 24.dp, end = 24.dp, top = 4.dp, bottom = if (selecting) 24.dp else 96.dp),
+                horizontalArrangement = Arrangement.spacedBy(MoyueSpacing.Item), verticalArrangement = Arrangement.spacedBy(MoyueSpacing.Section)) {
+                items(visible, key = { it.book.id }) { item ->
+                    BookTile(book = item.book, status = item.status, favorite = item.management.firstOrNull()?.favorite == true,
+                        selected = item.book.id in selected, selecting = selecting,
+                        modifier = Modifier.animateItem(fadeInSpec = tween(MoyueMotion.Standard), placementSpec = tween(MoyueMotion.Standard), fadeOutSpec = tween(MoyueMotion.Fast)),
+                        onOpen = { if (selecting) { if (!busy) toggle(item.book.id) } else onOpenBook(item.book.id) },
+                        onLongPress = { if (selecting) { if (!busy) toggle(item.book.id) } else actionSheet = item.book.id })
                 }
             }
         }
     }
+}
+
+@Composable
+private fun ShelfAction(label: String, enabled: Boolean = true, supporting: String? = null, destructive: Boolean = false, onClick: () -> Unit) {
+    ListItem(headlineContent = { Text(label, color = if (destructive) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface) },
+        supportingContent = supporting?.let { { Text(it) } }, colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+        modifier = Modifier.clickable(enabled = enabled, onClick = onClick))
 }
 
 @Composable
@@ -375,17 +365,16 @@ private fun ContinueReadingCard(book: BookEntity, onOpen: (Long) -> Unit) {
 
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
-private fun BookTile(book: BookEntity, onOpen: () -> Unit, onLongPress: () -> Unit, modifier: Modifier = Modifier) {
+private fun BookTile(book: BookEntity, status: ReadingStatus, favorite: Boolean, selecting: Boolean, selected: Boolean, onOpen: () -> Unit, onLongPress: () -> Unit, modifier: Modifier = Modifier) {
     Column(
         modifier.combinedClickable(onClick = onOpen, onLongClick = onLongPress),
     ) {
-        BookCover(
-            title = book.title,
-            author = book.author,
-            coverPath = book.coverPath,
-                    sourceType = book.sourceType,
-            modifier = Modifier.fillMaxWidth().aspectRatio(.7f),
-        )
+        Box {
+            BookCover(title = book.title, author = book.author, coverPath = book.coverPath, sourceType = book.sourceType,
+                modifier = Modifier.fillMaxWidth().aspectRatio(.7f))
+            if (selecting) androidx.compose.material3.Checkbox(selected, onCheckedChange = null, modifier = Modifier.align(Alignment.TopEnd).background(MaterialTheme.colorScheme.surface.copy(alpha = .9f)))
+            else if (favorite) Text("★", color = MaterialTheme.colorScheme.primary, modifier = Modifier.align(Alignment.TopEnd).background(MaterialTheme.colorScheme.surface.copy(alpha = .9f)).padding(horizontal = 6.dp))
+        }
         Text(
             book.title,
             style = MaterialTheme.typography.labelLarge,
@@ -394,7 +383,7 @@ private fun BookTile(book: BookEntity, onOpen: () -> Unit, onLongPress: () -> Un
             modifier = Modifier.padding(top = MoyueSpacing.Tight),
         )
         Text(
-            (when(book.sourceType) { com.moyue.reader.core.model.SourceType.MARKDOWN -> "MD · "; com.moyue.reader.core.model.SourceType.DOCUMENT -> documentLabel(book) + " · "; else -> "" }) + (if(isImage(book)) "查看图片" else progressLabel(book.progress)),
+            (when(book.sourceType) { com.moyue.reader.core.model.SourceType.MARKDOWN -> "MD · "; com.moyue.reader.core.model.SourceType.DOCUMENT -> documentLabel(book) + " · "; else -> "" }) + status.label + (if (isImage(book)) "" else " · ${(book.progress * 100).toInt()}%"),
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -402,17 +391,10 @@ private fun BookTile(book: BookEntity, onOpen: () -> Unit, onLongPress: () -> Un
 }
 
 private fun isImage(book:BookEntity) = com.moyue.reader.core.document.ReaderEngineRegistry.item(book).format == com.moyue.reader.core.document.DocumentFormat.IMAGE
-private fun isVisual(book:BookEntity) = com.moyue.reader.core.document.ReaderEngineRegistry.item(book).format in setOf(com.moyue.reader.core.document.DocumentFormat.IMAGE,com.moyue.reader.core.document.DocumentFormat.COMIC)
 private fun documentLabel(book:BookEntity) = when(com.moyue.reader.core.document.ReaderEngineRegistry.item(book).format) {
     com.moyue.reader.core.document.DocumentFormat.IMAGE -> "图片"
     com.moyue.reader.core.document.DocumentFormat.COMIC -> "漫画"
     else -> "PDF"
-}
-
-private fun progressLabel(progress: Float): String = when {
-    progress >= .999f -> "已读完"
-    progress > 0f -> "${(progress * 100).toInt()}%"
-    else -> "未开始"
 }
 
 private fun relativeTime(millis: Long): String {
@@ -425,13 +407,4 @@ private fun relativeTime(millis: Long): String {
         minutes < 60 * 24 * 30 -> "${minutes / (60 * 24)} 天前"
         else -> DateFormat.getDateInstance().format(Date(millis))
     }
-}
-
-private val ShelfFilter.label get() = when (this) {
-    ShelfFilter.ALL -> "全部"
-    ShelfFilter.RECENT -> "最近阅读"
-    ShelfFilter.FINISHED -> "已读完"
-    ShelfFilter.MARKDOWN -> "Markdown"
-    ShelfFilter.DOCUMENT -> "文档"
-    ShelfFilter.VISUAL -> "图片/漫画"
 }

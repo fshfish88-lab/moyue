@@ -15,9 +15,9 @@ android {
         applicationId = "com.moyue.reader"
         minSdk = 26
         targetSdk = 36
-        versionCode = 27
-        // V1.6.4: receive document shares, including generic MIME types and multiple files.
-        versionName = "1.6.4"
+        versionCode = 28
+        // V1.7.0: independent status/favorites, multiple shelves/tags and bulk management.
+        versionName = "1.7.0"
         testInstrumentationRunner = "com.moyue.reader.feature.annotations.V160Instrumentation"
     }
 

@@ -26,6 +26,8 @@ class MoyueContainer(val applicationContext: Application) {
     val database = MoyueDatabase.get(applicationContext)
     val storage = BookStorage(applicationContext.filesDir, applicationContext.cacheDir).also(BookStorage::ensureRoots)
     val preferences = ReaderPreferencesRepository(applicationContext)
+    val shelfPreferences = com.moyue.reader.feature.bookshelf.ShelfPreferencesRepository(applicationContext)
+    val shelves = com.moyue.reader.feature.bookshelf.ShelfRepository(database, shelfPreferences)
     val importCoordinator = AtomicImportCoordinator(
         storage,
         RoomAtomicImportStore(database, storage, GeneratedCoverFileWriter()),
