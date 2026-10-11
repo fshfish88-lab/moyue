@@ -15,9 +15,9 @@ android {
         applicationId = "com.moyue.reader"
         minSdk = 26
         targetSdk = 36
-        versionCode = 26
-        // V1.6.3: forward body taps without interfering with native text selection.
-        versionName = "1.6.3"
+        versionCode = 27
+        // V1.6.4: receive document shares, including generic MIME types and multiple files.
+        versionName = "1.6.4"
         testInstrumentationRunner = "com.moyue.reader.feature.annotations.V160Instrumentation"
     }
 

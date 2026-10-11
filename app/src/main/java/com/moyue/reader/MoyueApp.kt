@@ -59,7 +59,7 @@ private sealed interface AppScreen {
 }
 
 @Composable
-fun MoyueApp(container: MoyueContainer, sharedUrl: String? = null) {
+fun MoyueApp(container: MoyueContainer, sharedUrl: String? = null, shareReceiver: com.moyue.reader.feature.importbook.ShareReceiverViewModel? = null) {
     val books by container.database.bookDao().observeAll().collectAsState(initial = emptyList())
     val preferences by container.preferences.preferences.collectAsState(initial = ReaderPreferences())
     val updateState by container.updates.state.collectAsState()
@@ -72,6 +72,26 @@ fun MoyueApp(container: MoyueContainer, sharedUrl: String? = null) {
     var webBusy by remember { mutableStateOf(false) }
     var webError by remember { mutableStateOf<String?>(null) }
     var pendingWebUrl by remember { mutableStateOf(sharedUrl.orEmpty()) }
+
+    val sharedWebUrl = shareReceiver?.webUrl
+    LaunchedEffect(sharedWebUrl?.id) {
+        sharedWebUrl?.let {
+            screen = AppScreen.Shelf
+            pendingWebUrl = it.url
+            webError = null
+            webPreview = null
+            showImport = true
+            shareReceiver.consumeWebUrl(it.id)
+        }
+    }
+    val sharedImportState = shareReceiver?.importState
+    LaunchedEffect(sharedImportState) {
+        if (sharedImportState != null) {
+            showImport = false
+            screen = AppScreen.Shelf
+        }
+    }
+    val visibleImportState = sharedImportState ?: importState
 
     val filePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
@@ -197,7 +217,7 @@ fun MoyueApp(container: MoyueContainer, sharedUrl: String? = null) {
         }
         }
         SnackbarHost(snackbar)
-        if ((screen == AppScreen.Shelf || screen == AppScreen.Settings) && !showImport && importState == null) {
+        if ((screen == AppScreen.Shelf || screen == AppScreen.Settings) && !showImport && visibleImportState == null) {
             com.moyue.reader.feature.update.AppUpdateDialogs(container.updates)
         }
         if (showImport) {
@@ -249,9 +269,12 @@ fun MoyueApp(container: MoyueContainer, sharedUrl: String? = null) {
                 onDismiss = { showImport = false; webPreview = null; webError = null },
             )
         }
-        importState?.let { state ->
-            ImportProgressDialog(state, onDismiss = { importState = null }, onRead = {
-                importState = null
+        visibleImportState?.let { state ->
+            fun dismissImport() {
+                if (sharedImportState != null) shareReceiver?.dismissImport() else importState = null
+            }
+            ImportProgressDialog(state, onDismiss = { dismissImport() }, onRead = {
+                dismissImport()
                 if(state is ImportState.Completed) openContent(state.bookId)
             })
         }

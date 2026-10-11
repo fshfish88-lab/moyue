@@ -1,4 +1,8 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <provider android:name="com.moyue.reader.feature.importbook.ShareFixtureProvider" android:authorities="com.moyue.reader.test.sharefiles" android:exported="false" android:grantUriPermissions="true" />
+        <activity android:name="com.moyue.reader.feature.importbook.ShareSenderActivity" android:exported="true" />
+    </application>
     <instrumentation android:name="com.moyue.reader.feature.annotations.V160Instrumentation" android:targetPackage="com.moyue.reader" />
     <instrumentation android:name="com.moyue.reader.feature.annotations.V161Instrumentation" android:targetPackage="com.moyue.reader" />
     <instrumentation android:name="com.moyue.reader.feature.reader.ReaderControlsInstrumentation" android:targetPackage="com.moyue.reader" />
@@ -10,4 +14,5 @@
     <instrumentation android:name="com.moyue.reader.feature.update.UpdateSmokeInstrumentation" android:targetPackage="com.moyue.reader" />
     <instrumentation android:name="com.moyue.reader.feature.reader.WebLiveInstrumentation" android:targetPackage="com.moyue.reader" />
     <instrumentation android:name="com.moyue.reader.feature.annotations.SearchScopeInstrumentation" android:targetPackage="com.moyue.reader" />
+    <instrumentation android:name="com.moyue.reader.feature.importbook.ShareImportInstrumentation" android:targetPackage="com.moyue.reader" />
 </manifest>
