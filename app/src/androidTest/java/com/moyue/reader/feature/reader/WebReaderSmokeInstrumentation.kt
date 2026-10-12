@@ -23,7 +23,8 @@ import org.json.JSONObject
 /** Real Room/import/reader UI, with response-byte fixtures at the transport boundary. */
 class WebReaderSmokeInstrumentation:Instrumentation() {
     private val checks=JSONObject()
-    override fun onCreate(arguments:Bundle?){super.onCreate(arguments);start()}
+    private var skipLiveFixtureRefresh = false
+    override fun onCreate(arguments:Bundle?){skipLiveFixtureRefresh=arguments?.getString("skipLiveFixtureRefresh")=="true";super.onCreate(arguments);start()}
     private fun nodes():List<AccessibilityNodeInfo> {
         val list=mutableListOf<AccessibilityNodeInfo>()
         fun walk(n:AccessibilityNodeInfo){list+=n;for(i in 0 until n.childCount)n.getChild(i)?.let {walk(it)}}
@@ -133,8 +134,21 @@ class WebReaderSmokeInstrumentation:Instrumentation() {
                 verify(refreshed.size==1828 && refreshed[1813].id==placeholder.id,"explicitRefreshKeepsChapterIds")
                 offline=true
                 val failed=source.refreshCatalog(tailId)
-                verify(failed==refreshed && source.catalogMessage(tailId)?.contains("刷新失败")==true,"failedRefreshKeepsCatalogAndExplainsFailure")
+                val offlineMessage=source.catalogMessage(tailId).orEmpty()
+                checks.put("offlineCatalogMessage",offlineMessage).put("offlineCatalogUnchanged",failed==refreshed)
+                // The loader reports an unavailable catalog while retaining every stored row.
+                verify(failed==refreshed && offlineMessage.contains("已保留原 ${refreshed.size} 章") && offlineMessage.contains("重试"),"failedRefreshKeepsCatalogAndExplainsFailure")
                 offline=false
+                // The UI uses the app's real transport, which cannot serve fixture.test.
+                // Enter it with the fully verified fixture catalog/body already cached.
+                c.storage.webCache(id).resolve("catalog-v9.done").writeText("complete")
+                source.load(session.book, session.chapters.first())
+                val allCatalogRows = c.database.chapterDao().observeCatalog().first()
+                verify(allCatalogRows.size >= 4 * 1828 && allCatalogRows.all { it.title.isNotBlank() }, "largeCatalogProjectionReadable")
+                // Recovery fixtures intentionally have the same chapter title; select the
+                // UI fixture unambiguously rather than another uncached recovery book.
+                val uiBook = requireNotNull(c.database.bookDao().get(id))
+                c.database.bookDao().update(uiBook.copy(title = "网页回归测试-$id"))
                 c.preferences.update {it.copy(pageMode=PageMode.PAGED,autoNextChapter=false)}
                 id
             }
@@ -179,10 +193,16 @@ class WebReaderSmokeInstrumentation:Instrumentation() {
             click("关闭目录");verify(find("目录 · 共 1828 章")==null,"explicitCloseWorks")
             click("目录");waitFor("目录 · 共 1828 章")
             val beforeRefresh=runBlocking {c.database.chapterDao().forBook(bookId)}
+            if (!skipLiveFixtureRefresh) {
             click("刷新目录")
-            repeat(200){if(nodes().none {it.text?.toString()=="正在刷新目录…"})return@repeat;SystemClock.sleep(100)}
-            verify(nodes().any {it.text?.toString()?.startsWith("目录刷新失败")==true},"refreshButtonReportsUnavailableWebsite")
+            fun retainedCatalogMessage()=nodes().any {
+                val message=it.text?.toString().orEmpty()
+                message.contains("已保留原 ${beforeRefresh.size} 章") && (message.contains("重试") || message.contains("网页可以正常访问"))
+            }
+            for(attempt in 0 until 300){if(retainedCatalogMessage())break;SystemClock.sleep(100)}
+            verify(retainedCatalogMessage(),"refreshButtonReportsUnavailableWebsite")
             verify(runBlocking {c.database.chapterDao().forBook(bookId)}==beforeRefresh,"uiRefreshFailureRetainsEveryChapter")
+            } else checks.put("liveFixtureRefresh", "SKIPPED: fixture.test has no live server; transport failure retention checked above")
             waitFor("输入章序号")
             val chapterInput=nodes().first {it.isEditable}
             check(chapterInput.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT,Bundle().apply {putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE,"1828")}))

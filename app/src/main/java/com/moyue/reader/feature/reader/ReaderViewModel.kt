@@ -15,6 +15,9 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.sync.withLock
 
 data class ReaderState(
     val bookId: Long,
@@ -44,6 +47,9 @@ class ReaderViewModel(private val repository: ReaderRepository) : ViewModel() {
     val openError: StateFlow<String?> = mutableOpenError.asStateFlow()
     private val navigation = Mutex()
     private var saveJob: Job? = null
+    private var adjacentJob: Job? = null
+    private var pendingSave: ReaderState? = null
+    private var saveUpdatedAt = 0L
 
     // True while this session opened somewhere the stored position never was (for example the
     // chapter requested by a failing restore). Passive updates must not move the stored position
@@ -55,7 +61,8 @@ class ReaderViewModel(private val repository: ReaderRepository) : ViewModel() {
     private var storedChapterIndex: Int? = null
 
     suspend fun open(bookId: Long, chapterIndex: Int? = null) {
-        saveJob?.cancel()
+        adjacentJob?.cancelAndJoin()
+        cancelPendingSave()
         mutableState.value = null
         mutableOpenError.value = null
         restorePending = false
@@ -94,9 +101,10 @@ class ReaderViewModel(private val repository: ReaderRepository) : ViewModel() {
     suspend fun goNext() = navigate { nextChapter() }
 
     private suspend fun navigate(action: suspend () -> Unit) {
+        adjacentJob?.cancelAndJoin()
         navigation.lock()
         try {
-            saveJob?.cancel()
+            cancelPendingSave()
             action()
             mutableState.value = mutableState.value?.copy(error = null)
             // Navigation is a decision made by the reader, so the chapter it reached is persisted
@@ -173,6 +181,7 @@ class ReaderViewModel(private val repository: ReaderRepository) : ViewModel() {
     }
     fun clearJumpHighlight() { mutableState.value = mutableState.value?.copy(jumpHighlight = null) }
     suspend fun refreshCatalog() {
+        adjacentJob?.cancelAndJoin()
         if(!navigation.tryLock())return
         val before=mutableState.value
         try {
@@ -194,10 +203,12 @@ class ReaderViewModel(private val repository: ReaderRepository) : ViewModel() {
     }
 
     suspend fun prefetchFollowing() {
+        adjacentJob?.cancelAndJoin()
         val before = mutableState.value ?: return
         // Only prepare the next chapter; repeated layout callbacks must not chain through the book.
         if ((before.scrollWindow.lastOrNull()?.index ?: before.chapter.index) > before.chapter.index) return
-        if (before.prefetching || !before.preferences.autoNextChapter || !navigation.tryLock()) return
+        if (before.prefetching || !before.preferences.autoNextChapter) return
+        if (!navigation.tryLock()) return
         mutableState.value = before.copy(prefetching = true)
         try {
             val last = before.scrollWindow.lastOrNull() ?: before.chapter
@@ -215,13 +226,23 @@ class ReaderViewModel(private val repository: ReaderRepository) : ViewModel() {
         }
     }
 
+    suspend fun prefetchAdjacent() {
+        val job = currentCoroutineContext()[Job]
+        adjacentJob = job
+        try {
+            navigation.withLock {
+                val current = mutableState.value ?: return
+                repository.prefetchAdjacent(current.chapter.index)
+            }
+        } finally {
+            if (adjacentJob === job) adjacentJob = null
+        }
+    }
+
     fun updateScrollPosition(chapterId: Long, position: ReaderPosition, progress: Float) {
         val current = mutableState.value ?: return
         val chapter = current.scrollWindow.firstOrNull { it.id == chapterId } ?: return
-        mutableState.value = current.copy(chapter = chapter,
-            canGoPrevious = chapter.index > 0,
-            canGoNext = chapter.index < current.chapters.lastIndex || !current.chapters[chapter.index].nextUrl.isNullOrBlank())
-        updatePosition(position, progress)
+        updatePosition(current, chapter, position, progress)
     }
 
     fun toggleControls() {
@@ -234,20 +255,40 @@ class ReaderViewModel(private val repository: ReaderRepository) : ViewModel() {
 
     fun updatePosition(position: ReaderPosition, chapterProgress: Float) {
         val current = mutableState.value ?: return
+        updatePosition(current, current.chapter, position, chapterProgress)
+    }
+
+    private fun updatePosition(current: ReaderState, chapter: ReaderChapter, position: ReaderPosition, chapterProgress: Float) {
         val safeProgress = chapterProgress.coerceIn(0f, 1f)
+        if (current.chapter.id == chapter.id && current.position == position && current.chapterProgress == safeProgress) return
         val updated = current.copy(
+            chapter = chapter,
+            canGoPrevious = chapter.index > 0,
+            canGoNext = chapter.index < current.chapters.lastIndex || !current.chapters[chapter.index].nextUrl.isNullOrBlank(),
             position = position,
             chapterProgress = safeProgress,
-            bookProgress = chapterBookProgress(current.chapter.index, safeProgress, current.chapters.size),
+            bookProgress = chapterBookProgress(chapter.index, safeProgress, current.chapters.size),
         )
         mutableState.value = updated
-        saveJob?.cancel()
+        pendingSave = updated
+        saveUpdatedAt = System.nanoTime()
+        if (saveJob?.isActive == true) return
         // The state update above is what the reader sees; the delayed write is best effort, so a
         // scope that cannot start (for example without a main dispatcher) must not undo it.
         saveJob = try {
             viewModelScope.launch {
-                delay(300)
-                saveSafely(updated)
+                // One worker per scroll burst; position changes extend its deadline instead of
+                // cancelling and creating a coroutine for each visible line.
+                while (pendingSave != null) {
+                    val remaining = 300 - (System.nanoTime() - saveUpdatedAt) / 1_000_000
+                    if (remaining > 0) {
+                        delay(remaining)
+                        continue
+                    }
+                    val latest = pendingSave ?: break
+                    pendingSave = null
+                    saveSafely(latest)
+                }
             }
         } catch (_: IllegalStateException) {
             null
@@ -255,7 +296,7 @@ class ReaderViewModel(private val repository: ReaderRepository) : ViewModel() {
     }
 
     suspend fun flushProgress() {
-        saveJob?.cancel()
+        cancelPendingSave()
         mutableState.value?.let { saveSafely(it) }
     }
 
@@ -265,8 +306,14 @@ class ReaderViewModel(private val repository: ReaderRepository) : ViewModel() {
      * chapter the reader explicitly opened is a deliberate change of position.
      */
     suspend fun flushProgressOnBack() {
-        saveJob?.cancel()
+        cancelPendingSave()
         mutableState.value?.let { saveSafely(it, regression = true) }
+    }
+
+    private fun cancelPendingSave() {
+        saveJob?.cancel()
+        saveJob = null
+        pendingSave = null
     }
 
     private suspend fun moveTo(index: Int) {

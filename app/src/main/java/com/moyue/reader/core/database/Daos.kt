@@ -28,8 +28,8 @@ interface BookDao {
 
 @Dao
 interface ChapterDao {
-    @Query("SELECT * FROM chapters ORDER BY id")
-    fun observeCatalog(): Flow<List<ChapterEntity>>
+    @Query("SELECT id, title, chapterIndex FROM chapters ORDER BY id")
+    fun observeCatalog(): Flow<List<CatalogSearchRow>>
 
     @Update suspend fun update(chapter: ChapterEntity)
 
@@ -42,6 +42,9 @@ interface ChapterDao {
     @Insert(onConflict = OnConflictStrategy.ABORT)
     suspend fun insertAll(chapters: List<ChapterEntity>): List<Long>
 }
+
+/** Search invalidation needs no cache paths, source URLs or other chapter payload. */
+data class CatalogSearchRow(val id: Long, val title: String, val chapterIndex: Int)
 
 @Dao
 interface ReadingProgressDao {

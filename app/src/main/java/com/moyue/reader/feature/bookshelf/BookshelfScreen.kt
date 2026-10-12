@@ -106,6 +106,7 @@ fun BookshelfScreen(
     var selected by remember { mutableStateOf<Set<Long>>(emptySet()) }
     var busy by remember { mutableStateOf(false) }
     var collectionMenu by remember { mutableStateOf(false) }
+    var statusMenu by remember { mutableStateOf(false) }
     var sortDialog by remember { mutableStateOf(false) }
     var filterDialog by remember { mutableStateOf(false) }
     var statusTargets by remember { mutableStateOf<Set<Long>?>(null) }
@@ -141,8 +142,6 @@ fun BookshelfScreen(
     val visible = shelfBooks(library.books, effective, query)
     val recent = books.maxByOrNull { it.lastReadAt ?: Long.MIN_VALUE }?.takeIf { it.lastReadAt != null }
     fun toggle(id: Long) { selected = if (id in selected) selected - id else selected + id }
-    val collection = effective.shelfId?.let { id -> library.shelves.firstOrNull { it.id == id }?.name } ?: "全部书籍"
-    val collectionLabel = if (effective.favoritesOnly) { if (effective.shelfId == null) "收藏" else "$collection · 收藏" } else collection
 
     pendingDelete?.let { ids ->
         val targets = books.filter { it.id in ids }
@@ -235,25 +234,46 @@ fun BookshelfScreen(
         Column(Modifier.fillMaxSize().padding(padding)) {
             AnimatedVisibility(searchVisible) { TextField(query, { query = it }, placeholder = { Text("搜索书名或作者") }, singleLine = true, modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp)) }
             if (!selecting) recent?.let { ContinueReadingCard(it, onOpenBook) }
-            Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.weight(1f)) {
-                    TextButton(enabled = !selecting && !busy, onClick = { collectionMenu = true }) { Text("$collectionLabel ▾", maxLines = 1, overflow = TextOverflow.Ellipsis) }
-                    androidx.compose.material3.DropdownMenu(collectionMenu, { collectionMenu = false }) {
-                        androidx.compose.material3.DropdownMenuItem(text = { Text("全部书籍") }, onClick = { onPreferences { it.copy(shelfId = null) }; collectionMenu = false })
-                        library.shelves.forEach { shelf -> androidx.compose.material3.DropdownMenuItem(text = { Text(shelf.name) }, onClick = { onPreferences { it.copy(shelfId = shelf.id) }; collectionMenu = false }) }
-                        HorizontalDivider()
-                        androidx.compose.material3.DropdownMenuItem(text = { Text("管理书架") }, onClick = { collectionMenu = false; catalog = false })
-                        androidx.compose.material3.DropdownMenuItem(text = { Text("管理标签") }, onClick = { collectionMenu = false; catalog = true })
+            Row(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                Row(Modifier.weight(1f).horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilterChip(selected = effective.shelfId == null, enabled = !selecting && !busy,
+                        onClick = { onPreferences { it.copy(shelfId = null) } }, label = { Text("全部书籍") })
+                    library.shelves.forEach { shelf ->
+                        FilterChip(selected = effective.shelfId == shelf.id, enabled = !selecting && !busy,
+                            onClick = { onPreferences { it.copy(shelfId = if (it.shelfId == shelf.id) null else shelf.id) } },
+                            label = { Text(shelf.name, maxLines = 1, overflow = TextOverflow.Ellipsis) })
+                    }
+                    Box {
+                        FilterChip(selected = false, enabled = !selecting && !busy, onClick = { collectionMenu = true }, label = { Text("管理 ▾") })
+                        androidx.compose.material3.DropdownMenu(collectionMenu, { collectionMenu = false }) {
+                            androidx.compose.material3.DropdownMenuItem(text = { Text("管理书架") }, onClick = { collectionMenu = false; catalog = false })
+                            androidx.compose.material3.DropdownMenuItem(text = { Text("管理标签") }, onClick = { collectionMenu = false; catalog = true })
+                        }
                     }
                 }
                 TextButton(enabled = !selecting, onClick = { sortDialog = true }) { Text("${effective.sort.label} ▾", style = MaterialTheme.typography.labelMedium) }
                 val filterCount = effective.formats.size + effective.authors.size + effective.tagIds.size
                 TextButton(enabled = !selecting, onClick = { filterDialog = true }) { Text(if (filterCount == 0) "筛选" else "筛选($filterCount)") }
             }
-            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 24.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FilterChip(selected = effective.status == null, enabled = !selecting, onClick = { onPreferences { it.copy(status = null) } }, label = { Text("全部状态") })
-                ReadingStatus.entries.forEach { value -> FilterChip(selected = effective.status == value, enabled = !selecting, onClick = { onPreferences { it.copy(status = if (it.status == value) null else value) } }, label = { Text(value.label) }) }
-                FilterChip(selected = effective.favoritesOnly, enabled = !selecting, onClick = { onPreferences { it.copy(favoritesOnly = !it.favoritesOnly) } }, label = { Text("收藏") })
+            Box(Modifier.padding(horizontal = 16.dp)) {
+                val statusLabel = effective.status?.label ?: "全部状态"
+                TextButton(enabled = !selecting, onClick = { statusMenu = true }) {
+                    Text("${if (effective.favoritesOnly) "$statusLabel · 收藏" else statusLabel} ▾")
+                }
+                androidx.compose.material3.DropdownMenu(statusMenu, { statusMenu = false }) {
+                    androidx.compose.material3.DropdownMenuItem(text = { Text("全部状态") },
+                        onClick = { onPreferences { it.copy(status = null) }; statusMenu = false },
+                        trailingIcon = { if (effective.status == null) Text("✓") })
+                    ReadingStatus.entries.forEach { value ->
+                        androidx.compose.material3.DropdownMenuItem(text = { Text(value.label) },
+                            onClick = { onPreferences { it.copy(status = if (it.status == value) null else value) }; statusMenu = false },
+                            trailingIcon = { if (effective.status == value) Text("✓") })
+                    }
+                    HorizontalDivider()
+                    androidx.compose.material3.DropdownMenuItem(text = { Text("收藏") },
+                        onClick = { onPreferences { it.copy(favoritesOnly = !it.favoritesOnly) }; statusMenu = false },
+                        trailingIcon = { if (effective.favoritesOnly) Text("✓") })
+                }
             }
             Row(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 8.dp)) {
                 Text("我的书架", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)

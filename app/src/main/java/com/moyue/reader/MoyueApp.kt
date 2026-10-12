@@ -24,7 +24,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.ui.Modifier
-import com.moyue.reader.core.database.BookEntity
 import com.moyue.reader.core.database.ChapterEntity
 import com.moyue.reader.core.settings.ReaderPreferences
 import com.moyue.reader.core.ui.MoyueMotion
@@ -60,17 +59,12 @@ private sealed interface AppScreen {
 
 @Composable
 fun MoyueApp(container: MoyueContainer, sharedUrl: String? = null, shareReceiver: com.moyue.reader.feature.importbook.ShareReceiverViewModel? = null) {
-    val books by container.database.bookDao().observeAll().collectAsState(initial = emptyList())
-    val shelfLibrary by container.shelves.library.collectAsState(initial = com.moyue.reader.feature.bookshelf.ShelfLibrary())
-    val shelfPreferences by container.shelfPreferences.preferences.collectAsState(initial = com.moyue.reader.feature.bookshelf.ShelfPreferences())
     val preferences by container.preferences.preferences.collectAsState(initial = ReaderPreferences())
-    val updateState by container.updates.state.collectAsState()
     val scope = rememberCoroutineScope()
     val snackbar = remember { SnackbarHostState() }
     var screen: AppScreen by remember { mutableStateOf(AppScreen.Shelf) }
     var showImport by remember { mutableStateOf(!sharedUrl.isNullOrBlank()) }
     var importState by remember { mutableStateOf<ImportState?>(null) }
-    var webPreview by remember { mutableStateOf<WebImportPreview?>(null) }
     var webBusy by remember { mutableStateOf(false) }
     var webError by remember { mutableStateOf<String?>(null) }
     var pendingWebUrl by remember { mutableStateOf(sharedUrl.orEmpty()) }
@@ -81,7 +75,6 @@ fun MoyueApp(container: MoyueContainer, sharedUrl: String? = null, shareReceiver
             screen = AppScreen.Shelf
             pendingWebUrl = it.url
             webError = null
-            webPreview = null
             showImport = true
             shareReceiver.consumeWebUrl(it.id)
         }
@@ -120,6 +113,29 @@ fun MoyueApp(container: MoyueContainer, sharedUrl: String? = null, shareReceiver
         }
     }
 
+    fun importWeb(loadPreview: suspend () -> WebImportPreview, fallback: String) {
+        webBusy = true
+        webError = null
+        scope.launch {
+            try {
+                val preview = loadPreview()
+                showImport = false
+                val result = container.importService.importWeb(preview) { importState = it }
+                if (result is ImportState.Completed) {
+                    importState = null
+                    screen = AppScreen.Reader(result.bookId)
+                } else importState = result
+            } catch (error: kotlinx.coroutines.CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                showImport = true
+                webError = error.message ?: fallback
+            } finally {
+                webBusy = false
+            }
+        }
+    }
+
     MoyueTheme {
         BackHandler(enabled = screen != AppScreen.Shelf && screen !is AppScreen.Reader && screen !is AppScreen.Markdown && screen !is AppScreen.Pdf && screen !is AppScreen.Visual) { screen = AppScreen.Shelf }
         AnimatedContent(targetState = screen, label = "screen", transitionSpec = {
@@ -127,50 +143,58 @@ fun MoyueApp(container: MoyueContainer, sharedUrl: String? = null, shareReceiver
                 (slideOutHorizontally(tween(MoyueMotion.Fast, easing = MoyueMotion.Easing)) { if (targetState == AppScreen.Shelf) it / 12 else -it / 12 } + fadeOut(tween(MoyueMotion.Fast)))
         }) { destination ->
         when (destination) {
-            AppScreen.Shelf -> BookshelfScreen(
-                books = books,
-                library = shelfLibrary,
-                preferences = shelfPreferences,
-                repository = container.shelves,
-                onPreferences = { transform -> scope.launch { runCatching { container.shelfPreferences.update(transform) }.onFailure { snackbar.showSnackbar("偏好保存失败，请重试") } } },
-                onMessage = { message -> scope.launch { snackbar.showSnackbar(message) } },
-                onDeleteBooks = { ids ->
-                    val removed = mutableSetOf<Long>()
-                    for (id in ids) {
-                        try { deleteShelfBook(container, id); removed.add(id) }
-                        catch (e: Exception) { if (e is kotlinx.coroutines.CancellationException) throw e }
-                    }
-                    snackbar.showSnackbar(if (removed.size == ids.size) "已删除 ${removed.size} 本书籍" else "已删除 ${removed.size} 本，${ids.size - removed.size} 本删除失败，可重试")
-                    removed
-                },
-                onOpenBook = { openContent(it) },
-                onEditMarkdown = { openContent(it, true) },
-                onBookDetails = { screen = AppScreen.Detail(it) },
-                onAddBook = { showImport = true },
-                onSettings = { screen = AppScreen.Settings },
-                onGlobalSearch = { screen = AppScreen.Search },
-                onAnnotations = { screen = AppScreen.Annotations },
-            )
+            AppScreen.Shelf -> {
+                val books by container.database.bookDao().observeAll().collectAsState(initial = emptyList())
+                val shelfLibrary by container.shelves.library.collectAsState(initial = com.moyue.reader.feature.bookshelf.ShelfLibrary())
+                val shelfPreferences by container.shelfPreferences.preferences.collectAsState(initial = com.moyue.reader.feature.bookshelf.ShelfPreferences())
+                BookshelfScreen(
+                    books = books,
+                    library = shelfLibrary,
+                    preferences = shelfPreferences,
+                    repository = container.shelves,
+                    onPreferences = { transform -> scope.launch { runCatching { container.shelfPreferences.update(transform) }.onFailure { snackbar.showSnackbar("偏好保存失败，请重试") } } },
+                    onMessage = { message -> scope.launch { snackbar.showSnackbar(message) } },
+                    onDeleteBooks = { ids ->
+                        val removed = mutableSetOf<Long>()
+                        for (id in ids) {
+                            try { deleteShelfBook(container, id); removed.add(id) }
+                            catch (e: Exception) { if (e is kotlinx.coroutines.CancellationException) throw e }
+                        }
+                        snackbar.showSnackbar(if (removed.size == ids.size) "已删除 ${removed.size} 本书籍" else "已删除 ${removed.size} 本，${ids.size - removed.size} 本删除失败，可重试")
+                        removed
+                    },
+                    onOpenBook = { openContent(it) },
+                    onEditMarkdown = { openContent(it, true) },
+                    onBookDetails = { screen = AppScreen.Detail(it) },
+                    onAddBook = { showImport = true },
+                    onSettings = { screen = AppScreen.Settings },
+                    onGlobalSearch = { screen = AppScreen.Search },
+                    onAnnotations = { screen = AppScreen.Annotations },
+                )
+            }
             AppScreen.Annotations -> com.moyue.reader.feature.annotations.AnnotationCenter(container, { screen = AppScreen.Shelf }, { id, anchor -> openContent(id, anchor = anchor) })
             AppScreen.Search -> com.moyue.reader.feature.annotations.GlobalSearch(container, { screen = AppScreen.Shelf }, { id, anchor -> openContent(id, anchor = anchor) })
-            AppScreen.Settings -> SettingsScreen(
-                preferences = preferences,
-                onPreferences = { value -> scope.launch { container.preferences.update { value } } },
-                onClearCache = {
-                    scope.launch {
-                        withContext(Dispatchers.IO) {
-                            container.applicationContext.cacheDir.resolve("books").deleteRecursively()
-                            container.storage.ensureRoots()
+            AppScreen.Settings -> {
+                val updateState by container.updates.state.collectAsState()
+                SettingsScreen(
+                    preferences = preferences,
+                    onPreferences = { value -> scope.launch { container.preferences.update { value } } },
+                    onClearCache = {
+                        scope.launch {
+                            withContext(Dispatchers.IO) {
+                                container.applicationContext.cacheDir.resolve("books").deleteRecursively()
+                                container.storage.ensureRoots()
+                            }
+                            snackbar.showSnackbar("缓存已清理，源文件和阅读记录仍保留")
                         }
-                        snackbar.showSnackbar("缓存已清理，源文件和阅读记录仍保留")
-                    }
-                },
-                onBookshelf = { screen = AppScreen.Shelf },
-                updateState = updateState,
-                onAutomaticUpdates = container.updates::setAutomatic,
-                onCheckUpdates = container.updates::checkManually,
-                onOpenUpdate = container.updates::showPrompt,
-            )
+                    },
+                    onBookshelf = { screen = AppScreen.Shelf },
+                    updateState = updateState,
+                    onAutomaticUpdates = container.updates::setAutomatic,
+                    onCheckUpdates = container.updates::checkManually,
+                    onOpenUpdate = container.updates::showPrompt,
+                )
+            }
             is AppScreen.Reader -> ReaderDestination(
                 destination,
                 container,
@@ -192,7 +216,6 @@ fun MoyueApp(container: MoyueContainer, sharedUrl: String? = null, shareReceiver
             is AppScreen.Visual -> com.moyue.reader.feature.image.VisualScreen(destination.bookId, container, preferences, { value -> scope.launch {container.preferences.update {value}} }, {screen=AppScreen.Shelf}, initialAnchor=destination.anchor)
             is AppScreen.Detail -> DetailDestination(
                 bookId = destination.bookId,
-                books = books,
                 container = container,
                 onBack = { screen = AppScreen.Shelf },
                 onRead = { openContent(destination.bookId) },
@@ -205,22 +228,7 @@ fun MoyueApp(container: MoyueContainer, sharedUrl: String? = null, shareReceiver
                     screen = AppScreen.Shelf
                     pendingWebUrl = page.finalUrl
                     showImport = true
-                    webBusy = true
-                    webError = null
-                    scope.launch {
-                        runCatching { container.importService.previewWeb(page) }
-                            .onSuccess { preview ->
-                                showImport = false
-                                val result = container.importService.importWeb(preview) { importState = it }
-                                if (result is ImportState.Completed) {
-                                    importState = null
-                                    screen = AppScreen.Reader(result.bookId)
-                                } else importState = result
-                                webPreview = null
-                            }
-                            .onFailure { webError = it.message ?: "网页解析失败，请稍后重试" }
-                        webBusy = false
-                    }
+                    importWeb({ container.importService.previewWeb(page) }, "网页解析失败，请稍后重试")
                 },
             )
         }
@@ -232,11 +240,9 @@ fun MoyueApp(container: MoyueContainer, sharedUrl: String? = null, shareReceiver
         if (showImport) {
             ImportSheet(
                 initialUrl = pendingWebUrl,
-                preview = webPreview,
                 webBusy = webBusy,
                 webError = webError,
                 onPickFile = { filePicker.launch(arrayOf("*/*")) },
-                onPickAnyFile = { filePicker.launch(arrayOf("*/*")) },
                 onNewMarkdown = {
                     showImport = false
                     scope.launch {
@@ -247,35 +253,10 @@ fun MoyueApp(container: MoyueContainer, sharedUrl: String? = null, shareReceiver
                 },
                 onAnalyzeWeb = { url ->
                     pendingWebUrl = url
-                    webBusy = true
-                    webError = null
-                    webPreview = null
-                    scope.launch {
-                        runCatching { container.importService.previewWeb(url) }
-                            .onSuccess { preview ->
-                                showImport = false
-                                val result = container.importService.importWeb(preview) { importState = it }
-                                if (result is ImportState.Completed) {
-                                    importState = null
-                                    screen = AppScreen.Reader(result.bookId)
-                                } else importState = result
-                                webPreview = null
-                            }
-                            .onFailure { webError = it.message ?: "网页解析失败，请检查地址后重试" }
-                        webBusy = false
-                    }
+                    importWeb({ container.importService.previewWeb(url) }, "网页解析失败，请检查地址后重试")
                 },
                 onOpenBrowser = { url -> showImport = false; screen = AppScreen.Browser(url) },
-                onAddWeb = {
-                    webPreview?.let { preview ->
-                        showImport = false
-                        scope.launch {
-                            importState = container.importService.importWeb(preview) { importState = it }
-                            webPreview = null
-                        }
-                    }
-                },
-                onDismiss = { showImport = false; webPreview = null; webError = null },
+                onDismiss = { showImport = false; webError = null },
             )
         }
         visibleImportState?.let { state ->
@@ -308,6 +289,7 @@ private fun ReaderDestination(
     }
     androidx.compose.runtime.DisposableEffect(store) { onDispose { store.clear() } }
     val state by viewModel.state.collectAsState()
+    LaunchedEffect(state?.chapter?.id) { viewModel.prefetchAdjacent() }
     val openError by viewModel.openError.collectAsState()
     val scope = rememberCoroutineScope()
     LaunchedEffect(destination.bookId, destination.chapterIndex, destination.anchor) {
@@ -407,13 +389,13 @@ private fun ReaderDestination(
 @Composable
 private fun DetailDestination(
     bookId: Long,
-    books: List<BookEntity>,
     container: MoyueContainer,
     onBack: () -> Unit,
     onRead: () -> Unit,
     onDeleted: () -> Unit,
 ) {
-    val book = books.firstOrNull { it.id == bookId }
+    val books by container.database.bookDao().observeAll().collectAsState(initial = null)
+    val book = books?.firstOrNull { it.id == bookId }
     var chapters by remember(bookId) { mutableStateOf<List<ChapterEntity>>(emptyList()) }
     var documentMetadata by remember(bookId) { mutableStateOf<com.moyue.reader.core.database.DocumentMetadataEntity?>(null) }
     var imageSize by remember(bookId) {mutableStateOf<String?>(null)}
@@ -424,6 +406,7 @@ private fun DetailDestination(
             source?.let {runCatching {com.moyue.reader.feature.image.ImageProbe.file(it)}.getOrNull()}?.let {imageSize="${it.width} × ${it.height}"}
         }
     }
+    if (books == null) return
     if (book == null) {
         LaunchedEffect(Unit) { onBack() }
         return

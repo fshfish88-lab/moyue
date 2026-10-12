@@ -8,10 +8,6 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.semantics.clearAndSetSemantics
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -52,8 +48,6 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.mutableStateMapOf
-import androidx.compose.ui.viewinterop.AndroidView
-import androidx.compose.ui.graphics.toArgb
 import androidx.compose.foundation.background
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.TopAppBarDefaults
@@ -64,18 +58,7 @@ import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
 import androidx.compose.runtime.key
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.Constraints
-import androidx.compose.foundation.gestures.detectVerticalDragGestures
-import androidx.compose.foundation.gestures.detectHorizontalDragGestures
-import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
-import androidx.compose.ui.input.nestedscroll.NestedScrollSource
-import androidx.compose.ui.input.nestedscroll.nestedScroll
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.unit.Velocity
-import androidx.compose.ui.text.style.TextIndent
-import androidx.compose.ui.unit.em
 import kotlinx.coroutines.launch
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.LaunchedEffect
@@ -89,13 +72,11 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.moyue.reader.core.model.ContentBlock
 import com.moyue.reader.core.model.ReaderPosition
 import com.moyue.reader.core.settings.PageMode
-import com.moyue.reader.core.settings.ReaderFont
 import com.moyue.reader.core.settings.ReaderPreferences
 import com.moyue.reader.core.settings.SpacingLevel
 import com.moyue.reader.core.ui.ReaderDisplayEffects
@@ -132,7 +113,7 @@ fun ReaderScreen(
         ReaderContentState(state.chapter, state.position, preferences, state.canGoPrevious,
             state.canGoNext, state.error, state.scrollWindow, state.prefetching)
     }
-    val contentAnnotations = remember(annotations) { annotations }
+    val contentAnnotations = remember(annotations) { indexReaderAnnotations(annotations) }
     val latestSelection by rememberUpdatedState(onSelection)
     val contentSelection = remember {
         { chapter: com.moyue.reader.core.model.ReaderChapter, start: ReaderPosition, end: ReaderPosition, type: String ->
@@ -265,8 +246,9 @@ private data class ReaderContentState(
 
 @Composable
 private fun ScrollingChapter(state: ReaderContentState, onPosition: (Long, ReaderPosition, Float) -> Unit, onPrefetch: () -> Unit, onNext: () -> Unit, onToggleControls: () -> Unit,
-    annotations: List<com.moyue.reader.core.database.AnnotationEntity>, onSelection: (com.moyue.reader.core.model.ReaderChapter, ReaderPosition, ReaderPosition, String) -> Unit) {
+    annotations: Map<Long, List<IndexedReaderAnnotation>>, onSelection: (com.moyue.reader.core.model.ReaderChapter, ReaderPosition, ReaderPosition, String) -> Unit) {
     val window = state.scrollWindow.ifEmpty { listOf(state.chapter) }
+    val highlights = remember(window, annotations) { window.associate { it.id to chapterHighlights(it, annotations[it.id].orEmpty()) } }
     val entries = remember(window) { window.flatMap { chapter -> listOf(ScrollItem(chapter, -1)) + chapter.blocks.indices.map { ScrollItem(chapter, it) } } }
     val initial = remember {
         val block = if (state.position.blockIndex == 0 && state.position.charOffset == 0) -1 else state.position.blockIndex
@@ -286,23 +268,30 @@ private fun ScrollingChapter(state: ReaderContentState, onPosition: (Long, Reade
             restored = true
         }
     }
+    val itemsByKey = remember(entries) { entries.associateBy { it.key } }
+    val indexesByKey = remember(entries) { entries.mapIndexed { index, item -> item.key to index }.toMap() }
+    val latestPosition by rememberUpdatedState(onPosition)
+    val latestPrefetch by rememberUpdatedState(onPrefetch)
     LaunchedEffect(entries, restored) {
+        if (!restored) return@LaunchedEffect
         snapshotFlow {
-            val info = listState.layoutInfo
-            val first = info.visibleItemsInfo.firstOrNull { it.index == listState.firstVisibleItemIndex }
-            Triple(first?.key, listState.firstVisibleItemScrollOffset, info.visibleItemsInfo.lastOrNull()?.key)
-        }.collect { (firstKey, pixels, lastKey) ->
-                // Layout may still describe the previous window during a prepend/removal.
-                val entry = entries.firstOrNull { it.key == firstKey } ?: return@collect
-                val last = entries.indexOfFirst { it.key == lastKey }
-                if (restored) {
-                    val layout = layouts[entry.key]
-                    val offset = layout?.getLineStart(layout.getLineForVertical(pixels)) ?: 0
-                    onPosition(entry.chapter.id, ReaderPosition(entry.block.coerceAtLeast(0), offset),
-                        (entry.block.coerceAtLeast(0).toFloat() / entry.chapter.blocks.size.coerceAtLeast(1)).coerceIn(0f, 1f))
-                }
-                if (last >= entries.lastIndex - 5 && state.preferences.autoNextChapter && state.error == null) onPrefetch()
-            }
+            val first = listState.layoutInfo.visibleItemsInfo.firstOrNull { it.index == listState.firstVisibleItemIndex }
+            val entry = itemsByKey[first?.key] ?: return@snapshotFlow null
+            val pixels = listState.firstVisibleItemScrollOffset
+            val layout = layouts[entry.key]
+            val offset = layout?.getLineStart(layout.getLineForVertical(pixels)) ?: 0
+            Triple(entry.chapter.id, ReaderPosition(entry.block.coerceAtLeast(0), offset),
+                (entry.block.coerceAtLeast(0).toFloat() / entry.chapter.blocks.size.coerceAtLeast(1)).coerceIn(0f, 1f))
+        }.filterNotNull().distinctUntilChanged().collect { (chapter, position, progress) ->
+            latestPosition(chapter, position, progress)
+        }
+    }
+    LaunchedEffect(entries, state.chapter.id, state.preferences.autoNextChapter, state.error) {
+        if (!state.preferences.autoNextChapter || state.error != null) return@LaunchedEffect
+        snapshotFlow {
+            val last = indexesByKey[listState.layoutInfo.visibleItemsInfo.lastOrNull()?.key] ?: -1
+            last >= 0 && last >= entries.lastIndex - 5
+        }.distinctUntilChanged().collect { nearEnd -> if (nearEnd) latestPrefetch() }
     }
     val safe = WindowInsets.safeDrawing.asPaddingValues()
     val direction = LocalLayoutDirection.current
@@ -339,7 +328,7 @@ private fun ScrollingChapter(state: ReaderContentState, onPosition: (Long, Reade
                 else {
                     val text = com.moyue.reader.feature.annotations.blockText(block)
                     AnnotatedReaderText(text, item.chapter, listOf(com.moyue.reader.feature.annotations.TextSegment(0, text.length, item.block, 0)), state.preferences,
-                        annotations, Modifier.fillMaxWidth(), indent = state.preferences.indentParagraphs && block is ContentBlock.Text,
+                        highlights[item.chapter.id].orEmpty(), Modifier.fillMaxWidth(), indent = state.preferences.indentParagraphs && block is ContentBlock.Text,
                         onTap = { onToggleControls() },
                         onLayout = { layouts[item.key] = it }, onSelection = onSelection)
                 }
@@ -357,7 +346,8 @@ private fun ScrollingChapter(state: ReaderContentState, onPosition: (Long, Reade
 @Composable
 @android.annotation.SuppressLint("InlinedApi")
 private fun PagedChapter(state: ReaderContentState, onPosition: (ReaderPosition, Float) -> Unit, onPrevious:()->Unit,onNext: () -> Unit,onToggleControls:()->Unit,
-    annotations: List<com.moyue.reader.core.database.AnnotationEntity>, onSelection: (com.moyue.reader.core.model.ReaderChapter, ReaderPosition, ReaderPosition, String) -> Unit) {
+    annotations: Map<Long, List<IndexedReaderAnnotation>>, onSelection: (com.moyue.reader.core.model.ReaderChapter, ReaderPosition, ReaderPosition, String) -> Unit) {
+    val highlights = remember(state.chapter, annotations) { chapterHighlights(state.chapter, annotations[state.chapter.id].orEmpty()) }
     val density = LocalDensity.current
     val scope = rememberCoroutineScope()
     var selecting by remember { mutableStateOf(false) }
@@ -468,7 +458,7 @@ private fun PagedChapter(state: ReaderContentState, onPosition: (ReaderPosition,
                         ReaderImage(requireNotNull(pages[page].image), paged = true)
                     } else {
                     AnnotatedReaderText(pages[page].text.trimEnd('\n'), state.chapter, pages[page].segments, state.preferences,
-                        annotations, Modifier.fillMaxSize(), onTap = nativeTap, onSelecting = { selecting = it }, onSelection = onSelection)
+                        highlights, Modifier.fillMaxSize(), onTap = nativeTap, onSelecting = { selecting = it }, onSelection = onSelection)
                     }
                 }
                 else Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -502,30 +492,6 @@ private fun PagedChapter(state: ReaderContentState, onPosition: (ReaderPosition,
             }
         }
     }
-}
-
-@Composable
-private fun ReaderBlock(block: ContentBlock, preferences: ReaderPreferences, onLayout: (androidx.compose.ui.text.TextLayoutResult) -> Unit = {}) {
-    if (block is ContentBlock.Image) {
-        ReaderImage(block)
-        return
-    }
-    val text = when (block) {
-        is ContentBlock.Text -> block.text
-        is ContentBlock.Heading -> block.text
-        is ContentBlock.Quote -> block.text
-        is ContentBlock.Image -> block.description ?: "图片"
-        ContentBlock.Divider -> "· · ·"
-    }
-    Text(
-        text,
-        style = TextStyle(textIndent = TextIndent(firstLine = if (preferences.indentParagraphs && block is ContentBlock.Text) 2.em else 0.em)),
-        fontSize = preferences.fontSizeSp.sp,
-        lineHeight = (preferences.fontSizeSp * preferences.lineHeightFactor).sp,
-        fontFamily = preferences.font,
-        color = MaterialTheme.colorScheme.onBackground,
-        onTextLayout = onLayout,
-    )
 }
 
 /** Material3's default TopAppBar height. Reading text reserves this so a line never sits under the
@@ -591,17 +557,6 @@ private fun ReaderMenuButton(label: String, onClick: () -> Unit, icon: @Composab
         icon()
         Text(label, Modifier.padding(start = MoyueSpacing.Tight))
     }
-}
-
-private val ReaderPreferences.font: FontFamily get() = when (fontFamily) {
-    ReaderFont.SYSTEM, ReaderFont.SANS -> FontFamily.SansSerif
-    ReaderFont.SERIF, ReaderFont.LXGW -> FontFamily.Serif
-}
-
-private val ReaderPreferences.lineHeightFactor: Float get() = when (lineSpacing) {
-    SpacingLevel.COMPACT -> 1.45f
-    SpacingLevel.STANDARD -> 1.7f
-    SpacingLevel.WIDE -> 2.0f
 }
 
 private val SpacingLevel.dpValue get() = when (this) {

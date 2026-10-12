@@ -21,17 +21,20 @@ data class EpubPackage(
     val spine: List<EpubSpineItem>,
     val cover: EpubSpineItem?,
     val chapterTitles: Map<String, String> = emptyMap(),
+    val metadataFiles: List<File> = emptyList(),
 )
 
 class EpubPackageParser(
     private val factoryProvider: () -> DocumentBuilderFactory = DocumentBuilderFactory::newInstance,
 ) {
     fun parse(root: File): EpubPackage {
-        val container = parseXml(root.resolve("META-INF/container.xml"))
+        val metadataFiles = mutableListOf(root.resolve("META-INF/container.xml"))
+        val container = parseXml(metadataFiles.single())
         val rootfile = container.elements("rootfile").firstOrNull()
             ?.getAttribute("full-path")?.takeIf(String::isNotBlank)
             ?: error("EPUB 缺少 OPF 路径")
         val opfFile = safeResolve(root, rootfile)
+        metadataFiles += opfFile
         val document = parseXml(opfFile)
         val manifest = document.elements("item").associate { element ->
             val item = EpubSpineItem(
@@ -51,6 +54,7 @@ class EpubPackageParser(
         val titles = linkedMapOf<String, String>()
         manifest.values.filter { it.mediaType == "application/x-dtbncx+xml" || "nav" in it.properties.split(' ') }.forEach { item ->
             val file = safeResolve(directory, item.href)
+            metadataFiles += file
             val navigation = runCatching { parseXml(file) }.getOrNull() ?: return@forEach
             navigation.elements("navPoint").forEach { point ->
                 val content = point.getElementsByTagNameNS("*", "content").item(0) as? Element
@@ -79,6 +83,7 @@ class EpubPackageParser(
             packageDirectory = requireNotNull(opfFile.parentFile),
             spine = spine,
             chapterTitles = titles,
+            metadataFiles = metadataFiles,
             cover = manifest.values.firstOrNull { "cover-image" in it.properties.split(' ') }
                 ?: coverId?.let(manifest::get),
         )

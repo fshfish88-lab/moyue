@@ -15,9 +15,9 @@ android {
         applicationId = "com.moyue.reader"
         minSdk = 26
         targetSdk = 36
-        versionCode = 28
-        // V1.7.0: independent status/favorites, multiple shelves/tags and bulk management.
-        versionName = "1.7.0"
+        versionCode = 29
+        // V1.7.1: reader state/cache optimization and bookshelf control styles.
+        versionName = "1.7.1"
         testInstrumentationRunner = "com.moyue.reader.feature.annotations.V160Instrumentation"
     }
 
@@ -58,7 +58,6 @@ dependencies {
     implementation("androidx.activity:activity-compose:1.13.0")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.10.0")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.10.0")
-    implementation("androidx.navigation:navigation-compose:2.9.8")
     implementation(platform("androidx.compose:compose-bom:2026.03.01"))
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-tooling-preview")

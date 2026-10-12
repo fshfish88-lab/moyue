@@ -13,17 +13,15 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.material3.MaterialTheme
-import com.moyue.reader.core.database.AnnotationEntity
 import com.moyue.reader.core.model.ReaderChapter
 import com.moyue.reader.core.model.ReaderPosition
 import com.moyue.reader.core.settings.ReaderPreferences
 import com.moyue.reader.feature.annotations.*
-import org.json.JSONObject
 
 @Composable
 @android.annotation.SuppressLint("InlinedApi")
 internal fun AnnotatedReaderText(text: String, chapter: ReaderChapter, segments: List<TextSegment>, preferences: ReaderPreferences,
-    annotations: List<AnnotationEntity>, modifier: Modifier, indent: Boolean = false,
+    highlights: Map<Int, List<HighlightRange>>, modifier: Modifier, indent: Boolean = false,
     onTap: (Float) -> Unit = {},
     onLayout: (android.text.Layout) -> Unit = {}, onSelecting: (Boolean) -> Unit = {},
     onSelection: (ReaderChapter, ReaderPosition, ReaderPosition, String) -> Unit) {
@@ -36,27 +34,16 @@ internal fun AnnotatedReaderText(text: String, chapter: ReaderChapter, segments:
     val layoutCallback by rememberUpdatedState(onLayout)
     val positionSegments by rememberUpdatedState(segments)
     val currentChapter by rememberUpdatedState(chapter)
-    val styled = remember(text, chapter, segments, annotations, indent, fontPx) {
+    val styled = remember(text, segments, highlights, indent, fontPx) {
         SpannableString(text).apply {
             if (indent && isNotEmpty()) setSpan(LeadingMarginSpan.Standard((fontPx * 2).toInt(), 0), 0, length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
-            var highlights = emptyList<HighlightRange>()
-            val hashes = mutableMapOf<Int, String>()
-            annotations.filter { it.type != "BOOKMARK" }.sortedWith(compareBy<AnnotationEntity> { if (it.id < 0) Long.MAX_VALUE else it.updatedAt }.thenBy { it.id }).forEach { a ->
-                val anchor = runCatching { JSONObject(a.anchorJson) }.getOrNull() ?: return@forEach
-                if (anchor.optString("kind") != "TEXT" || anchor.optLong("chapterId") != chapter.id) return@forEach
-                val first = anchor.optInt("blockIndex"); val last = anchor.optInt("endBlock", first)
-                if (first !in chapter.blocks.indices || a.sourceHash != hashes.getOrPut(first) { textHash(blockText(chapter.blocks[first])) }) return@forEach
-                segments.forEach { segment ->
-                    if (segment.blockIndex in first..last) {
-                        val from = if (segment.blockIndex == first) anchor.optInt("charOffset") else 0
-                        val to = if (segment.blockIndex == last) anchor.optInt("endOffset") else Int.MAX_VALUE
-                        val left = segment.displayStart + (from - segment.sourceStart).coerceIn(0, segment.displayEnd - segment.displayStart)
-                        val right = segment.displayStart + (to - segment.sourceStart).coerceIn(0, segment.displayEnd - segment.displayStart)
-                        if (left < right && right <= length) highlights = overlayHighlight(highlights, HighlightRange(left, right, annotationColor(a.color)))
-                    }
+            segments.forEach { segment ->
+                highlights[segment.blockIndex].orEmpty().forEach { mark ->
+                    val left = segment.displayStart + (mark.start - segment.sourceStart).coerceIn(0, segment.displayEnd - segment.displayStart)
+                    val right = segment.displayStart + (mark.end - segment.sourceStart).coerceIn(0, segment.displayEnd - segment.displayStart)
+                    if (left < right && right <= length) setSpan(ReaderHighlightSpan(mark.color), left, right, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
                 }
             }
-            highlights.forEach { setSpan(ReaderHighlightSpan(it.color), it.start, it.end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE) }
         }
     }
     AndroidView(modifier = modifier, factory = { context -> HighlightedTextView(context).apply {

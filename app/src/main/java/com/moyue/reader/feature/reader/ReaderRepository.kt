@@ -98,14 +98,20 @@ class ReaderRepository(private val source: ReaderDataSource) {
         val book = requireNotNull(currentBook)
         val keep = setOf(index - 1, index, index + 1).filter { it in chapterList.indices }.toSet()
         if (index !in cache) cache[index] = source.load(book, chapterList[index])
-        (if (book.sourceType == SourceType.WEB) emptySet() else keep - index).forEach { chapterIndex ->
+        cache.keys.retainAll(keep)
+    }
+
+    /** Called after the visible chapter is published, under the ViewModel navigation lock. */
+    suspend fun prefetchAdjacent(index: Int) {
+        val book = currentBook ?: return
+        if (book.sourceType == SourceType.WEB) return
+        listOf(index - 1, index + 1).filter { it in chapterList.indices }.forEach { chapterIndex ->
             if (chapterIndex !in cache) {
                 try { cache[chapterIndex] = source.load(book, chapterList[chapterIndex]) }
                 catch (error: kotlinx.coroutines.CancellationException) { throw error }
                 catch (_: Exception) { /* Optional adjacent content cannot prevent opening the requested chapter. */ }
             }
         }
-        cache.keys.toList().filterNot(keep::contains).forEach(cache::remove)
     }
 }
 
@@ -116,6 +122,7 @@ class RoomReaderDataSource(
     private val webFetcher: com.moyue.reader.parser.web.WebPageSource = WebContentFetcher(),
     private val webExtractor: ReadabilityExtractor = ReadabilityExtractor(),
 ) : ReaderDataSource {
+    private val epubPackages = com.moyue.reader.parser.epub.EpubPackageCache()
     override suspend fun book(bookId: Long) = database.bookDao().get(bookId)
     override suspend fun refreshCatalog(bookId:Long):List<ChapterEntity> = withContext(Dispatchers.IO) {
         val book=requireNotNull(database.bookDao().get(bookId))
@@ -138,7 +145,7 @@ class RoomReaderDataSource(
         runCatching {
             if (!root.resolve("unpacked/META-INF/container.xml").isFile) rebuildDerivedCache(book)
             val parser = com.moyue.reader.parser.epub.EpubPackageParser()
-            val pkg = parser.parse(root.resolve("unpacked"))
+            val pkg = epubPackages.get(File(book.sourcePath), root.resolve("unpacked"))
             val updated = rows.map { chapter ->
                 val item = pkg.spine.getOrNull(chapter.chapterIndex) ?: return@map chapter
                 val file = parser.safeResolve(pkg.packageDirectory, item.href)
@@ -253,7 +260,7 @@ class RoomReaderDataSource(
                 val root = storage.epubCache(book.id).resolve("unpacked")
                 if (!root.resolve("META-INF/container.xml").isFile) rebuildDerivedCache(book)
                 val parser = com.moyue.reader.parser.epub.EpubPackageParser()
-                val pkg = parser.parse(root)
+                val pkg = epubPackages.get(File(book.sourcePath), root)
                 val item = pkg.spine[chapter.chapterIndex]
                 val document = parser.safeResolve(pkg.packageDirectory, item.href)
                 val blocks = com.moyue.reader.parser.epub.EpubContentParser.parse(document.readText(), document, root)
@@ -324,6 +331,7 @@ class RoomReaderDataSource(
         }
 
     private suspend fun rebuildDerivedCache(book: BookEntity) {
+        epubPackages.clear()
         val source = File(book.sourcePath)
         val parsed = when (book.sourceType) {
             SourceType.EPUB -> EpubBookParser().parse(ParseInput(source, SourceType.EPUB))

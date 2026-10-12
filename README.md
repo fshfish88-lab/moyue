@@ -13,7 +13,7 @@
 [![Kotlin](https://img.shields.io/badge/Kotlin-2.2.21-7F52FF?style=flat-square)](#开发与构建)
 [![Compose](https://img.shields.io/badge/UI-Jetpack%20Compose-5C6B58?style=flat-square)](#开发与构建)
 
-**[下载 Android 版](https://github.com/fshfish88-lab/moyue/releases/latest)** · [查看更新](docs/v1.7.0-release.md) · [反馈问题](https://github.com/fshfish88-lab/moyue/issues)
+**[下载 Android 版](https://github.com/fshfish88-lab/moyue/releases/latest)** · [查看更新](docs/v1.7.1-release.md) · [反馈问题](https://github.com/fshfish88-lab/moyue/issues)
 
 [界面预览](#界面预览) · [功能亮点](#功能亮点) · [支持格式](#支持格式) · [快速开始](#快速开始) · [开发与构建](#开发与构建)
 
@@ -36,7 +36,7 @@
     <td><img src="docs/images/multiselect.png" width="280" alt="墨阅多选模式：选择书籍并批量管理收藏、状态、书架与标签" /></td>
   </tr>
 </table>
-<sub>V1.7.0 模拟器实际截图，含验收用示例书籍。</sub>
+<sub>V1.7.1 模拟器实际截图，含验收用示例书籍。</sub>
 </div>
 
 ## 功能亮点
@@ -57,11 +57,11 @@
 - **状态**：想读、在读、读完，可手动调整。旧书升级时按进度初始化一次，之后阅读进度不会覆盖手动状态。
 - **收藏**：独立开关，可与阅读状态、自定义书架和其他条件叠加。
 - **书架与标签**：支持新建、重命名、删除和多重归类；删除分类只移除关系，书籍仍在。
-- **筛选**：顶部选择集合与状态，在筛选面板选择格式、作者、标签。多个标签需全部匹配；同一维度的格式、作者匹配任意一个，跨维度同时匹配。
+- **筛选**：顶部通过方块按钮选择书架、下拉列表选择状态，在筛选面板选择格式、作者、标签。多个标签需全部匹配；同一维度的格式、作者匹配任意一个，跨维度同时匹配。
 - **排序**：最近阅读、导入时间、书名、作者、阅读进度；返回书架或重启后恢复筛选与排序偏好。
 - **批量管理**：多选或全选当前筛选结果，批量调整收藏、状态、书架、标签，或确认后删除书籍。
 
-长按一本书即可打开管理菜单，还可补录系列信息。完整说明见 [V1.7.0 更新说明](docs/v1.7.0-release.md)。
+长按一本书即可打开管理菜单，还可补录系列信息。本次优化见 [V1.7.1 更新说明](docs/v1.7.1-release.md)，书架管理说明见 [V1.7.0 更新说明](docs/v1.7.0-release.md)。
 
 ## 支持格式
 
@@ -95,7 +95,7 @@
 2. 按系统提示允许当前下载来源安装应用，完成安装。
 3. 已有墨阅的用户请**直接覆盖安装，不要卸载**，以保留书籍、进度与标注。
 
-当前版本为 **V1.7.0**：[APK 下载](https://github.com/fshfish88-lab/moyue/releases/download/v1.7.0/Moyue-1.7.0.apk) · [源码包](https://github.com/fshfish88-lab/moyue/releases/download/v1.7.0/Moyue-1.7.0-source.zip) · [SHA256 校验文件](https://github.com/fshfish88-lab/moyue/releases/download/v1.7.0/SHA256.txt)
+当前版本为 **V1.7.1**：[APK 下载](https://github.com/fshfish88-lab/moyue/releases/download/v1.7.1/Moyue-1.7.1.apk) · [源码包](https://github.com/fshfish88-lab/moyue/releases/download/v1.7.1/Moyue-1.7.1-source.zip) · [SHA256 校验文件](https://github.com/fshfish88-lab/moyue/releases/download/v1.7.1/SHA256.txt)
 
 应用内可在「**设置 → 软件更新**」手动检查更新，也可开启自动检查。成功检查每天最多一次；下载后校验 SHA256、版本、包名与发布签名，再由用户确认安装。详见 [软件更新说明](docs/updates.md)。
 
@@ -176,7 +176,8 @@ scripts/             # 发布辅助脚本
 
 | 版本 | 主要变化 | 记录 |
 | :--- | :--- | :--- |
-| **V1.7.0** | 独立状态与收藏、多书架与标签、组合筛选、排序、批量管理 | [更新说明](docs/v1.7.0-release.md) · [验证记录](docs/v1.7.0-verification.md) |
+| **V1.7.1** | 阅读状态与 EPUB 缓存优化、标注索引、书架方块与状态下拉、大目录查询修复 | [更新说明](docs/v1.7.1-release.md) · [验证记录](docs/v1.7.1-verification.md) |
+| V1.7.0 | 独立状态与收藏、多书架与标签、组合筛选、排序、批量管理 | [更新说明](docs/v1.7.0-release.md) · [验证记录](docs/v1.7.0-verification.md) |
 | V1.6.4 | 系统单文件与多文件分享导入 | [更新说明](docs/v1.6.4-release.md) · [验证记录](docs/v1.6.4-verification.md) |
 | V1.6.3 | 分页与滚动交互修复、明确全局搜索范围 | [更新说明](docs/v1.6.3-release.md) · [验证记录](docs/v1.6.3-verification.md) |
 | V1.6.2 | 阅读工具栏响应优化 | [更新说明](docs/v1.6.2-release.md) · [验证记录](docs/v1.6.2-verification.md) |

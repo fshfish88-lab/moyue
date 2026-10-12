@@ -4,6 +4,10 @@ import com.moyue.reader.core.database.ReadingProgressEntity
 import com.moyue.reader.core.model.ContentBlock
 import com.moyue.reader.core.model.ReaderPosition
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.filterNotNull
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -107,8 +111,48 @@ class ReaderViewModelTest {
         viewModel.open(bookId = 1, chapterIndex = 100)
         viewModel.goNext()
 
+        viewModel.prefetchAdjacent()
         assertEquals(setOf(100, 101, 102), repository.cachedChapterIndexes())
         assertEquals(101, viewModel.state.value?.chapter?.index)
+    }
+
+    @Test fun duplicateScrollPositionKeepsTheSameStateAndCrossChapterPublishesOnce() = runBlocking {
+        val model = ReaderViewModel(ReaderRepository(FakeReaderDataSource(5)))
+        model.open(1)
+        val initial = model.state.value
+        model.updateScrollPosition(1, ReaderPosition(0, 0), 0f)
+        assertSame(initial, model.state.value)
+        model.prefetchFollowing()
+        val emitted = mutableListOf<ReaderState>()
+        val observer = launch(Dispatchers.Unconfined) { model.state.filterNotNull().collect { emitted += it } }
+        emitted.clear()
+        try {
+            blockingMainLaunch { model.updateScrollPosition(2, ReaderPosition(1, 3), .3f) }
+            assertEquals(1, emitted.size)
+            assertEquals(2L, emitted.single().chapter.id)
+            assertEquals(ReaderPosition(1, 3), emitted.single().position)
+            val current = model.state.value
+            model.updateScrollPosition(2, ReaderPosition(1, 3), .3f)
+            assertSame(current, model.state.value)
+            model.flushProgressOnBack()
+        } finally { observer.cancel() }
+    }
+
+    @Test fun visibleChapterDoesNotWaitForAdjacentLoads() = runBlocking {
+        val loaded = mutableListOf<Int>()
+        val fake = FakeReaderDataSource(5)
+        val source = object : ReaderDataSource by fake {
+            override suspend fun load(book: com.moyue.reader.core.database.BookEntity, chapter: com.moyue.reader.core.database.ChapterEntity): com.moyue.reader.core.model.ReaderChapter {
+                loaded += chapter.chapterIndex
+                return fake.load(book, chapter)
+            }
+        }
+        val model = ReaderViewModel(ReaderRepository(source))
+        model.open(1, 2)
+        assertEquals(listOf(2), loaded)
+        assertEquals(2, model.state.value!!.chapter.index)
+        model.prefetchAdjacent()
+        assertEquals(listOf(2, 1, 3), loaded)
     }
 
     @Test
