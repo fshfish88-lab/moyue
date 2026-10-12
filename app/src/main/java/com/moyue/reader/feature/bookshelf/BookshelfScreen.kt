@@ -251,28 +251,30 @@ fun BookshelfScreen(
                         }
                     }
                 }
+            }
+            Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
                 TextButton(enabled = !selecting, onClick = { sortDialog = true }) { Text("${effective.sort.label} ▾", style = MaterialTheme.typography.labelMedium) }
                 val filterCount = effective.formats.size + effective.authors.size + effective.tagIds.size
                 TextButton(enabled = !selecting, onClick = { filterDialog = true }) { Text(if (filterCount == 0) "筛选" else "筛选($filterCount)") }
-            }
-            Box(Modifier.padding(horizontal = 16.dp)) {
-                val statusLabel = effective.status?.label ?: "全部状态"
-                TextButton(enabled = !selecting, onClick = { statusMenu = true }) {
-                    Text("${if (effective.favoritesOnly) "$statusLabel · 收藏" else statusLabel} ▾")
-                }
-                androidx.compose.material3.DropdownMenu(statusMenu, { statusMenu = false }) {
-                    androidx.compose.material3.DropdownMenuItem(text = { Text("全部状态") },
-                        onClick = { onPreferences { it.copy(status = null) }; statusMenu = false },
-                        trailingIcon = { if (effective.status == null) Text("✓") })
-                    ReadingStatus.entries.forEach { value ->
-                        androidx.compose.material3.DropdownMenuItem(text = { Text(value.label) },
-                            onClick = { onPreferences { it.copy(status = if (it.status == value) null else value) }; statusMenu = false },
-                            trailingIcon = { if (effective.status == value) Text("✓") })
+                Box {
+                    val statusLabel = effective.status?.label ?: "全部状态"
+                    TextButton(enabled = !selecting, onClick = { statusMenu = true }) {
+                        Text("${if (effective.favoritesOnly) "$statusLabel · 收藏" else statusLabel} ▾")
                     }
-                    HorizontalDivider()
-                    androidx.compose.material3.DropdownMenuItem(text = { Text("收藏") },
-                        onClick = { onPreferences { it.copy(favoritesOnly = !it.favoritesOnly) }; statusMenu = false },
-                        trailingIcon = { if (effective.favoritesOnly) Text("✓") })
+                    androidx.compose.material3.DropdownMenu(statusMenu, { statusMenu = false }) {
+                        androidx.compose.material3.DropdownMenuItem(text = { Text("全部状态") },
+                            onClick = { onPreferences { it.copy(status = null) }; statusMenu = false },
+                            trailingIcon = { if (effective.status == null) Text("✓") })
+                        ReadingStatus.entries.forEach { value ->
+                            androidx.compose.material3.DropdownMenuItem(text = { Text(value.label) },
+                                onClick = { onPreferences { it.copy(status = if (it.status == value) null else value) }; statusMenu = false },
+                                trailingIcon = { if (effective.status == value) Text("✓") })
+                        }
+                        HorizontalDivider()
+                        androidx.compose.material3.DropdownMenuItem(text = { Text("收藏") },
+                            onClick = { onPreferences { it.copy(favoritesOnly = !it.favoritesOnly) }; statusMenu = false },
+                            trailingIcon = { if (effective.favoritesOnly) Text("✓") })
+                    }
                 }
             }
             Row(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 8.dp)) {

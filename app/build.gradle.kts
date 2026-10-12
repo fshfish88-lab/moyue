@@ -15,9 +15,9 @@ android {
         applicationId = "com.moyue.reader"
         minSdk = 26
         targetSdk = 36
-        versionCode = 29
-        // V1.7.1: reader state/cache optimization and bookshelf control styles.
-        versionName = "1.7.1"
+        versionCode = 30
+        // V1.7.2: full-width shelf row and combined sort/filter/status controls.
+        versionName = "1.7.2"
         testInstrumentationRunner = "com.moyue.reader.feature.annotations.V160Instrumentation"
     }
 
