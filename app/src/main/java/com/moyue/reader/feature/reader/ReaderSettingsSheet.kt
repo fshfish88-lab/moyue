@@ -12,9 +12,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
@@ -57,18 +56,35 @@ fun ReaderSettingsSheet(
     onDismiss: () -> Unit,
     showBookNavigation: Boolean = true,
 ) {
+    var advanced by remember { mutableStateOf(false) }
+    var fontDraft by remember { mutableStateOf<Float?>(null) }
+    var brightnessDraft by remember { mutableStateOf<Float?>(null) }
+    val preview = preferences.copy(fontSizeSp = fontDraft ?: preferences.fontSizeSp)
+    val face = rememberReaderTypeface(preferences.fontFamily)
+    fun commitDrafts() {
+        if (fontDraft != null || brightnessDraft != null) {
+            onChange(preferences.copy(fontSizeSp = fontDraft ?: preferences.fontSizeSp,
+                brightness = brightnessDraft ?: preferences.brightness))
+            fontDraft = null
+            brightnessDraft = null
+        }
+    }
     ModalBottomSheet(
-        onDismissRequest = onDismiss,
+        sheetState = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        onDismissRequest = { commitDrafts(); onDismiss() },
         containerColor = MaterialTheme.colorScheme.background,
         tonalElevation = 0.dp,
     ) {
-        Column(
-            Modifier
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 20.dp),
+        LazyColumn(
+            Modifier.padding(horizontal = 20.dp),
             verticalArrangement = Arrangement.spacedBy(MoyueSpacing.Section),
         ) {
-            Text("阅读设置", style = MaterialTheme.typography.titleLarge)
+            item { Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                Text("阅读设置", style = MaterialTheme.typography.titleLarge)
+                TextButton(onClick = { commitDrafts(); advanced = !advanced }) { Text(if (advanced) "常用设置" else "更多设置") }
+            } }
+            if (!advanced) {
+            item {
 
             // Theme swatches. The old row of five FilterChips said "米黄" / "淡绿" in words; showing
             // the actual paper colour is both faster to read and the point of a reading theme.
@@ -85,7 +101,8 @@ fun ReaderSettingsSheet(
             }
 
             // Live preview: the sample text renders at the size, line height and font being chosen.
-            SettingBlock("字号  ${preferences.fontSizeSp.toInt()}sp") {
+            }
+            item { SettingBlock("字号  ${preview.fontSizeSp.toInt()}sp") {
                 Box(
                     Modifier
                         .fillMaxWidth()
@@ -95,24 +112,26 @@ fun ReaderSettingsSheet(
                 ) {
                     Text(
                         "夜色渐渐笼罩城市，远处的灯光一点一点亮起。",
-                        fontSize = preferences.fontSizeSp.sp,
-                        lineHeight = (preferences.fontSizeSp * preferences.previewLineFactor).sp,
-                        fontFamily = preferences.previewFont,
+                        fontSize = preview.fontSizeSp.sp,
+                        lineHeight = (preview.fontSizeSp * preferences.previewLineFactor).sp,
+                        fontFamily = face?.let { FontFamily(it) } ?: FontFamily.Default,
                         color = readerPreviewInk(preferences),
                     )
                 }
                 Slider(
-                    value = preferences.fontSizeSp,
+                    value = preview.fontSizeSp,
                     // Continuous range, snapped to whole sp in the callback. A discrete step grid was
                     // the wrong tool here: no step count divides 14..32 evenly, so neighbouring stops
                     // rounded to the same integer and the "18sp" label could stall while the thumb
                     // kept moving. Rounding the value itself keeps label and rendered text in step.
-                    onValueChange = { onChange(preferences.copy(fontSizeSp = it.roundToInt().toFloat())) },
+                    onValueChange = { fontDraft = it.roundToInt().toFloat() },
+                    onValueChangeFinished = { commitDrafts() },
                     valueRange = 14f..32f,
                 )
             }
 
-            SettingBlock("字体") {
+            }
+            item { SettingBlock("字体") {
                 SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
                     ReaderFont.entries.forEachIndexed { index, font ->
                         SegmentedButton(
@@ -125,11 +144,16 @@ fun ReaderSettingsSheet(
                 }
             }
 
-            SpacingRow("行距", preferences.lineSpacing) { onChange(preferences.copy(lineSpacing = it)) }
-            SpacingRow("段距", preferences.paragraphSpacing) { onChange(preferences.copy(paragraphSpacing = it)) }
-            SpacingRow("边距", preferences.margin) { onChange(preferences.copy(margin = it)) }
+            }
+            } else {
+            item { SpacingRow("行距", preferences.lineSpacing) { onChange(preferences.copy(lineSpacing = it)) }
+            }
+            item { SpacingRow("段距", preferences.paragraphSpacing) { onChange(preferences.copy(paragraphSpacing = it)) }
+            }
+            item { SpacingRow("边距", preferences.margin) { onChange(preferences.copy(margin = it)) }
 
-            if (showBookNavigation) SettingBlock("翻页方式") {
+            }
+            item { if (showBookNavigation) SettingBlock("翻页方式") {
                 SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
                     PageMode.entries.forEachIndexed { index, mode ->
                         SegmentedButton(
@@ -142,19 +166,25 @@ fun ReaderSettingsSheet(
                 }
             }
 
-            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            }
+            item { HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
-            ToggleSetting("段落首行空两格", preferences.indentParagraphs) { onChange(preferences.copy(indentParagraphs = it)) }
-            if (showBookNavigation) ToggleSetting("章末继续翻动进入下一章", preferences.autoNextChapter) { onChange(preferences.copy(autoNextChapter = it)) }
-            ToggleSetting("阅读时屏幕常亮", preferences.keepScreenOn) { onChange(preferences.copy(keepScreenOn = it)) }
-            ToggleSetting("亮度跟随系统", preferences.brightness < 0f) {
+            }
+            item { ToggleSetting("段落首行空两格", preferences.indentParagraphs) { onChange(preferences.copy(indentParagraphs = it)) }
+            }
+            item { if (showBookNavigation) ToggleSetting("章末继续翻动进入下一章", preferences.autoNextChapter) { onChange(preferences.copy(autoNextChapter = it)) }
+            }
+            item { ToggleSetting("阅读时屏幕常亮", preferences.keepScreenOn) { onChange(preferences.copy(keepScreenOn = it)) }
+            }
+            item { ToggleSetting("亮度跟随系统", preferences.brightness < 0f) {
                 onChange(preferences.copy(brightness = if (it) -1f else .5f))
             }
             if (preferences.brightness >= 0f) {
                 SettingBlock("阅读亮度") {
                     Slider(
-                        value = preferences.brightness,
-                        onValueChange = { onChange(preferences.copy(brightness = it)) },
+                        value = brightnessDraft ?: preferences.brightness,
+                        onValueChange = { brightnessDraft = it },
+                        onValueChangeFinished = { commitDrafts() },
                         valueRange = .05f..1f,
                     )
                 }
@@ -162,17 +192,20 @@ fun ReaderSettingsSheet(
 
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
-            CustomColors(preferences, onChange)
+            }
+            item { CustomColors(preferences, onChange) }
+            }
 
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+            item { Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 TextButton(onClick = { onChange(ReaderPreferences()) }) { Text("恢复默认") }
                 Text(
-                    "修改会立即保存",
+                    "滑块松手后保存",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            Box(Modifier.height(20.dp))
+            }
+            item { Box(Modifier.height(20.dp)) }
         }
     }
 }
@@ -358,10 +391,4 @@ private val ReaderPreferences.previewLineFactor: Float
         SpacingLevel.COMPACT -> 1.45f
         SpacingLevel.STANDARD -> 1.7f
         SpacingLevel.WIDE -> 2.0f
-    }
-
-private val ReaderPreferences.previewFont: FontFamily
-    get() = when (fontFamily) {
-        ReaderFont.SYSTEM, ReaderFont.SANS -> FontFamily.SansSerif
-        ReaderFont.SERIF, ReaderFont.LXGW -> FontFamily.Serif
     }

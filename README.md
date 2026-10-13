@@ -13,7 +13,7 @@
 [![Kotlin](https://img.shields.io/badge/Kotlin-2.2.21-7F52FF?style=flat-square)](#开发与构建)
 [![Compose](https://img.shields.io/badge/UI-Jetpack%20Compose-5C6B58?style=flat-square)](#开发与构建)
 
-**[下载 Android 版](https://github.com/fshfish88-lab/moyue/releases/latest)** · [查看更新](docs/v1.7.2-release.md) · [反馈问题](https://github.com/fshfish88-lab/moyue/issues)
+**[下载 Android 版](https://github.com/fshfish88-lab/moyue/releases/latest)** · [查看更新](docs/v1.7.4-release.md) · [反馈问题](https://github.com/fshfish88-lab/moyue/issues)
 
 [界面预览](#界面预览) · [功能亮点](#功能亮点) · [支持格式](#支持格式) · [快速开始](#快速开始) · [开发与构建](#开发与构建)
 

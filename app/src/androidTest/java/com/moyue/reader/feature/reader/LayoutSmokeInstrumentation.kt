@@ -22,11 +22,13 @@ open class LayoutSmokeInstrumentation : Instrumentation() {
                 check(mixed.size == 3 && mixed[1].image == illustration)
                 check(mixed.map { it.start.blockIndex } == listOf(0, 1, 2))
                 check(mixed.first().text.contains("前文") && mixed.last().text.contains("后文"))
-                for (font in listOf(28f, 48f, 84f)) {
-                    val prefs = ReaderPreferences()
+                for ((font, family) in listOf(28f to com.moyue.reader.core.settings.ReaderFont.SYSTEM, 48f to com.moyue.reader.core.settings.ReaderFont.SYSTEM,
+                    84f to com.moyue.reader.core.settings.ReaderFont.SYSTEM, 48f to com.moyue.reader.core.settings.ReaderFont.LXGW)) {
+                    val prefs = ReaderPreferences(fontFamily = family)
+                    val face = ReaderFonts.load(targetContext, family)
                     val paragraph = "中文段落不会在页面底部截断。English words and 😀表情也应完整显示。".repeat(120)
                     val blocks = listOf(ContentBlock.Text(paragraph), ContentBlock.Text(paragraph))
-                    val pages = NativePageLayout.create(blocks, prefs, 900, 1500, font)
+                    val pages = NativePageLayout.create(blocks, prefs, 900, 1500, font, face)
                     check(pages.joinToString("") { it.text } == "　　" + paragraph + "\n\n　　" + paragraph)
                     for (page in pages) {
                         var bottom = 0
@@ -39,7 +41,7 @@ open class LayoutSmokeInstrumentation : Instrumentation() {
                                 breakStrategy = android.graphics.text.LineBreaker.BREAK_STRATEGY_SIMPLE
                                 hyphenationFrequency = android.text.Layout.HYPHENATION_FREQUENCY_NONE
                                 setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, font)
-                                typeface = prefs.nativeTypeface
+                                typeface = face
                                 setLineSpacing(font * (prefs.nativeLineFactor - 1f), 1f)
                                 text = page.text.trimEnd('\n')
                             }

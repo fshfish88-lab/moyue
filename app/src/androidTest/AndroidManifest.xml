@@ -15,6 +15,9 @@
     <instrumentation android:name="com.moyue.reader.feature.reader.WebReaderSmokeInstrumentation" android:targetPackage="com.moyue.reader" />
     <instrumentation android:name="com.moyue.reader.feature.update.UpdateSmokeInstrumentation" android:targetPackage="com.moyue.reader" />
     <instrumentation android:name="com.moyue.reader.feature.reader.WebLiveInstrumentation" android:targetPackage="com.moyue.reader" />
+    <instrumentation android:name="com.moyue.reader.feature.reader.WebPaginationInstrumentation" android:targetPackage="com.moyue.reader" />
+    <instrumentation android:name="com.moyue.reader.feature.reader.ReaderExperienceInstrumentation" android:targetPackage="com.moyue.reader" />
+    <instrumentation android:name="com.moyue.reader.feature.reader.LayoutSmokeInstrumentation" android:targetPackage="com.moyue.reader" />
     <instrumentation android:name="com.moyue.reader.feature.annotations.SearchScopeInstrumentation" android:targetPackage="com.moyue.reader" />
     <instrumentation android:name="com.moyue.reader.feature.importbook.ShareImportInstrumentation" android:targetPackage="com.moyue.reader" />
     <instrumentation android:name="com.moyue.reader.feature.bookshelf.V170Instrumentation" android:targetPackage="com.moyue.reader" />

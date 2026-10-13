@@ -9,8 +9,10 @@ class WebCatalogExtractor {
  private fun compact(text:String)=text.replace(Regex("[\\s<>»«›‹→←＞＜]+"),"")
  private fun directoryLabel(text:String)=compact(text).let {it.endsWith("目录") || Regex("^(?:返回|查看|全部|所有|完整|章节|小说)*(?:目录|章节)$").matches(it)}
  private fun navigation(title:String)=compact(title).let {it.isBlank() || directoryLabel(it) || Regex("^(?:上[一]?|下[一]?|前|后)[页章]$|^(?:首页|末页|尾页|书架|登录|加入书签)$").matches(it)}
- private fun prefix(source:String):String=URI(source).path.orEmpty().let {if(it.endsWith('/'))it else it.substringBeforeLast('/',"")+"/"}
- private fun sameBook(source:String,url:String)=URI(url).path.orEmpty().startsWith(prefix(source))
+ // Mobile catalogs may be siblings (/123_2/), while chapter URLs stay under /123/.
+ private fun bookPath(url:String)=URI(url).path.orEmpty().replace(Regex("/([0-9]+)_[0-9]+/$"),"/$1/")
+ private fun prefix(source:String):String=bookPath(source).let {if(it.endsWith('/'))it else it.substringBeforeLast('/',"")+"/"}
+ private fun sameBook(source:String,url:String)=bookPath(url).startsWith(prefix(source))
  fun directoryUrl(html:String,source:String):String? {
   val allLinks=WebHtml.links(html,source)
   val links=allLinks.filter {sameBook(source,it.url)}
@@ -62,6 +64,11 @@ class WebCatalogExtractor {
  fun isDirectoryPage(html:String,source:String):Boolean {
   val entries=chapters(html,source)
   return entries.size>=3 && !startsAfterFirstChapter(entries) && entries.count {isChapterTitle(it.title)}>=3
+ }
+ fun declaredChapterCount(html:String):Int? {
+  val doc=Jsoup.parse(html)
+  doc.select("script,style").remove()
+  return Regex("共\\s*([0-9]+)\\s*(?:章|个章节)").find(doc.text())?.groupValues?.get(1)?.toIntOrNull()
  }
     fun isChapterTitle(title:String)=Regex("^(?:正文\\s*)?(?:第.{1,16}[章回节卷]|序章|楔子|番外|尾声|Chapter\\s+\\d+)",RegexOption.IGNORE_CASE).containsMatchIn(title)
     fun order(entries:List<WebCatalogEntry>):List<WebCatalogEntry> = entries.distinctBy {it.url}.sortedBy {chapterNumber(it.title) ?: if(it.title.startsWith("序章") || it.title.startsWith("楔子"))-1 else Int.MAX_VALUE}

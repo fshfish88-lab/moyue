@@ -3,28 +3,59 @@ package com.moyue.reader.parser.epub
 import com.moyue.reader.core.model.ContentBlock
 import java.io.File
 import java.net.URI
+import org.jsoup.Jsoup
+import org.jsoup.nodes.Element
+import org.jsoup.nodes.Node
+import org.jsoup.nodes.TextNode
 
 /** Preserve local illustrations in document order, including SVG image wrappers. */
 internal object EpubContentParser {
     fun parse(html: String, document: File, root: File): List<ContentBlock> {
-        val body = html.replace(Regex("(?is)<(head|script|style|nav|aside)\\b[^>]*>.*?</\\1>"), "")
+        val body = Jsoup.parse(html).body()
+        body.select("script, style, nav").remove()
         val result = mutableListOf<ContentBlock>()
-        fun text(value: String) {
-            HtmlTextNormalizer.toPlainText(value).split(Regex("\\R\\s*\\R"))
-                .filter(String::isNotBlank).forEach { result += ContentBlock.Text(it) }
+        val pending = StringBuilder()
+        fun flush(kind: String) {
+            pending.toString().replace('\u00a0', ' ').lines().map(String::trim).filter(String::isNotEmpty).forEach {
+                result += when {
+                    kind.matches(Regex("h[1-6]")) -> ContentBlock.Heading(it, kind.last().digitToInt())
+                    kind == "blockquote" -> ContentBlock.Quote(it)
+                    else -> ContentBlock.Text(it)
+                }
+            }
+            pending.clear()
         }
-        var cursor = 0
-        Regex("(?is)<(?:img|image)\\b[^>]*>").findAll(body).forEach { match ->
-            text(body.substring(cursor, match.range.first))
-            val attributes = Regex("([\\w:-]+)\\s*=\\s*([\"'])(.*?)\\2", RegexOption.DOT_MATCHES_ALL)
-                .findAll(match.value).associate { it.groupValues[1].lowercase() to it.groupValues[3].replace("&amp;", "&") }
-            val src = attributes["src"] ?: attributes["xlink:href"] ?: attributes["href"]
-            val file = src?.let { resolve(it, document, root) }
-            if (file != null) result += ContentBlock.Image(file.absolutePath, attributes["alt"]?.takeIf(String::isNotBlank))
-            else result += ContentBlock.Text(attributes["alt"]?.takeIf(String::isNotBlank) ?: "图片路径无效")
-            cursor = match.range.last + 1
+        fun visit(node: Node, kind: String = "p") {
+            if (node is TextNode) { pending.append(node.wholeText); return }
+            if (node !is Element) return
+            val tag = node.normalName()
+            if (tag == "img" || tag == "image") {
+                flush(kind)
+                val src = listOf("src", "xlink:href", "href").firstNotNullOfOrNull { node.attr(it).takeIf(String::isNotBlank) }
+                val file = src?.let { resolve(it, document, root) }
+                val alt = node.attr("alt").takeIf(String::isNotBlank)
+                result += if (file != null) ContentBlock.Image(file.absolutePath, alt) else ContentBlock.Text(alt ?: "图片路径无效")
+                return
+            }
+            if (tag == "hr") { flush(kind); result += ContentBlock.Divider; return }
+            if (tag == "br") { flush(kind); return }
+            if (tag == "tr") {
+                flush(kind)
+                val cells = node.children().filter { it.normalName() in setOf("td", "th") }
+                if (node.select("img, image").isNotEmpty()) {
+                    cells.forEach { visit(it, kind) }
+                    flush(kind)
+                } else if (cells.isNotEmpty()) result += ContentBlock.Text(cells.joinToString(" | ") { it.text() })
+                return
+            }
+            val boundary = node.isBlock
+            val nextKind = if (tag.matches(Regex("h[1-6]")) || tag == "blockquote") tag else kind
+            if (boundary) flush(kind)
+            node.childNodes().forEach { visit(it, nextKind) }
+            if (boundary) flush(nextKind)
         }
-        text(body.substring(cursor))
+        visit(body)
+        flush("p")
         return result
     }
 

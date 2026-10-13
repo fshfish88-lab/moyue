@@ -104,6 +104,7 @@ fun ReaderScreen(
     onAnnotations: () -> Unit = {},
     onBookmark: () -> Unit = {},
 ) {
+    val pageCache = remember { ReaderPageCache() }
     var showChapters by remember { mutableStateOf(false) }
     var showSettings by remember { mutableStateOf(false) }
     val preferences = state.preferences
@@ -134,7 +135,7 @@ fun ReaderScreen(
             if (preferences.pageMode == PageMode.SCROLL) {
                 ScrollingChapter(content, onScrollPosition, onPrefetch, onNext, onToggleControls, contentAnnotations, contentSelection)
             } else {
-                PagedChapter(content, onPosition, onPrevious, onNext, onToggleControls, contentAnnotations, contentSelection)
+                PagedChapter(content, pageCache, onPosition, onPrevious, onNext, onToggleControls, contentAnnotations, contentSelection)
             }
 
             }
@@ -295,6 +296,10 @@ private fun ScrollingChapter(state: ReaderContentState, onPosition: (Long, Reade
     }
     val safe = WindowInsets.safeDrawing.asPaddingValues()
     val direction = LocalLayoutDirection.current
+    if (rememberReaderTypeface(state.preferences.fontFamily) == null) {
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+        return
+    }
     LazyColumn(state = listState, modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(
             start = state.preferences.margin.dpValue + safe.calculateLeftPadding(direction),
@@ -345,7 +350,7 @@ private fun ScrollingChapter(state: ReaderContentState, onPosition: (Long, Reade
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 @android.annotation.SuppressLint("InlinedApi")
-private fun PagedChapter(state: ReaderContentState, onPosition: (ReaderPosition, Float) -> Unit, onPrevious:()->Unit,onNext: () -> Unit,onToggleControls:()->Unit,
+private fun PagedChapter(state: ReaderContentState, cache: ReaderPageCache, onPosition: (ReaderPosition, Float) -> Unit, onPrevious:()->Unit,onNext: () -> Unit,onToggleControls:()->Unit,
     annotations: Map<Long, List<IndexedReaderAnnotation>>, onSelection: (com.moyue.reader.core.model.ReaderChapter, ReaderPosition, ReaderPosition, String) -> Unit) {
     val highlights = remember(state.chapter, annotations) { chapterHighlights(state.chapter, annotations[state.chapter.id].orEmpty()) }
     val density = LocalDensity.current
@@ -389,9 +394,11 @@ private fun PagedChapter(state: ReaderContentState, onPosition: (ReaderPosition,
                 keepScreenOn = false,
             )
         }
-        val layout by produceState<Result<List<ReaderPage>>?>(null, state.chapter.id, layoutPreferences, width, height, fontPx) {
+        val face = rememberReaderTypeface(state.preferences.fontFamily)
+        val layout by produceState<Result<List<ReaderPage>>?>(null, state.chapter.blocks, layoutPreferences, width, height, fontPx, face) {
             value = null
-            value = try { Result.success(withContext(Dispatchers.Default) { NativePageLayout.create(state.chapter.blocks, layoutPreferences, width, height, fontPx) }) }
+            if (face == null) return@produceState
+            value = try { Result.success(withContext(Dispatchers.Default) { cache.pages(state.chapter.blocks, layoutPreferences, width, height, fontPx, face) }) }
             catch (error: kotlinx.coroutines.CancellationException) { throw error }
             catch (error: Exception) { Result.failure(error) }
         }

@@ -12,10 +12,6 @@ import com.moyue.reader.core.settings.SpacingLevel
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 
-internal val ReaderPreferences.nativeTypeface: Typeface get() = when (fontFamily) {
-    ReaderFont.SERIF, ReaderFont.LXGW -> Typeface.SERIF
-    else -> Typeface.DEFAULT
-}
 internal val ReaderPreferences.nativeLineFactor: Float get() = when (lineSpacing) {
     SpacingLevel.COMPACT -> 1.45f; SpacingLevel.STANDARD -> 1.7f; SpacingLevel.WIDE -> 2f
 }
@@ -24,12 +20,12 @@ internal val ReaderPreferences.nativeLineFactor: Float get() = when (lineSpacing
 // LineBreaker constants are inlined integers supported by StaticLayout since API 23.
 @android.annotation.SuppressLint("InlinedApi")
 internal object NativePageLayout {
-    suspend fun create(blocks: List<ContentBlock>, preferences: ReaderPreferences, width: Int, height: Int, fontPx: Float): List<ReaderPage> {
+    suspend fun create(blocks: List<ContentBlock>, preferences: ReaderPreferences, width: Int, height: Int, fontPx: Float, face: Typeface = requireNotNull(ReaderFonts.cached(preferences.fontFamily))): List<ReaderPage> {
         require(width > 0 && height >= fontPx * 1.5f) { "阅读区域过小，请减小字号或旋转屏幕" }
         if (blocks.any { it is ContentBlock.Image }) return buildList {
             var start = 0
             suspend fun flush(end: Int) {
-                if (end > start) addAll(create(blocks.subList(start, end), preferences, width, height, fontPx).map {
+                if (end > start) addAll(create(blocks.subList(start, end), preferences, width, height, fontPx, face).map {
                     it.copy(start = it.start.copy(blockIndex = it.start.blockIndex + start), end = it.end.copy(blockIndex = it.end.blockIndex + start), segments = it.segments.map { segment -> segment.copy(blockIndex = segment.blockIndex + start) })
                 })
             }
@@ -53,13 +49,17 @@ internal object NativePageLayout {
         val starts = texts.map { text -> length.also { length += text.length + separator.length } }
         val full = texts.joinToString(separator)
         if (full.isEmpty()) return listOf(ReaderPage("", ReaderPosition(0, 0), ReaderPosition(0, 0)))
+        val index = ChapterTextIndex(starts)
         fun position(offset: Int): ReaderPosition {
-            val i = starts.binarySearch(offset).let { if (it >= 0) it else (-it - 2).coerceAtLeast(0) }
+            val i = index.blockAt(offset)
             val leading = originals[i].length - originals[i].trimStart().length
             return ReaderPosition(i, (offset - starts[i] - prefixes[i].length + leading).coerceIn(0, originals[i].length))
         }
-        val paint = TextPaint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply { textSize = fontPx; typeface = preferences.nativeTypeface }
-        val layout = StaticLayout.Builder.obtain(full, 0, full.length, paint, width)
+        val paint = TextPaint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply { textSize = fontPx; typeface = face }
+        val styled = android.text.SpannableString(full).apply {
+            blocks.forEachIndexed { i, block -> styleBlock(block, starts[i], starts[i] + texts[i].length) }
+        }
+        val layout = StaticLayout.Builder.obtain(styled, 0, styled.length, paint, width)
             .setAlignment(Layout.Alignment.ALIGN_NORMAL).setIncludePad(false)
             .setLineSpacing(fontPx * (preferences.nativeLineFactor - 1f), 1f)
             .setBreakStrategy(android.graphics.text.LineBreaker.BREAK_STRATEGY_SIMPLE).setHyphenationFrequency(Layout.HYPHENATION_FREQUENCY_NONE)
@@ -73,7 +73,7 @@ internal object NativePageLayout {
                 while (line + 1 < layout.lineCount && layout.getLineBottom(line + 1) - top <= height) line++
                 val start = layout.getLineStart(first)
                 val end = layout.getLineEnd(line)
-                val segments = texts.indices.mapNotNull { i ->
+                val segments = index.intersecting(start, end).mapNotNull { i ->
                     val contentStart = starts[i] + prefixes[i].length
                     val contentEnd = starts[i] + texts[i].length
                     val left = maxOf(start, contentStart)

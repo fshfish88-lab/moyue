@@ -11,6 +11,7 @@ data class ReadablePage(
     val previousUrl: String?,
     val nextUrl: String?,
     val removedItems: List<String>,
+    val nextPageUrl: String? = null,
 )
 
 class ReadabilityExtractor {
@@ -46,6 +47,7 @@ class ReadabilityExtractor {
             previousUrl = findChapterLink(html, base, previous = true),
             nextUrl = findChapterLink(html, base, previous = false),
             removedItems = removed.distinct(),
+            nextPageUrl = findNextPageLink(html, base.toString()),
         )
     }
 
@@ -97,20 +99,22 @@ class ReadabilityExtractor {
             ?.let(::htmlToText).orEmpty()
 
     private fun findChapterLink(html: String, base: URI, previous: Boolean): String? {
-        val anchors = Regex("(?is)<a\\b([^>]*)>(.*?)</a>").findAll(html)
-        val words = if (previous) listOf("上一章", "上一页", "前一章", "prev") else listOf("下一章", "下一页", "后一章", "next")
-        anchors.forEach { match ->
-            val attributes = match.groupValues[1]
-            val label = htmlToText(match.groupValues[2]) + " " + attributes
-            if (words.any { label.contains(it, ignoreCase = true) }) {
-                val href = Regex("(?is)href\\s*=\\s*[\"']([^\"']+)[\"']").find(attributes)?.groupValues?.get(1)
-                    ?: return@forEach
-                val resolved = runCatching { base.resolve(href) }.getOrNull() ?: return@forEach
-                if ((resolved.scheme.equals("http", true) || resolved.scheme.equals("https", true)) && resolved.toString().substringBefore('#') != base.toString().substringBefore('#')) return resolved.toString()
-            }
-        }
-        return null
+        val words = if (previous) listOf("上一章", "上章", "前一章") else listOf("下一章", "下章", "后一章")
+        val direction = if (previous) "prev" else "next"
+        return WebHtml.links(html, base.toString()).firstOrNull { link ->
+            val label = link.title.replace(Regex("\\s+"), "")
+            link.url != base.toString().substringBefore('#') &&
+                !label.contains("页") && !label.contains("page", true) &&
+                (words.any { label.contains(it) } || label.equals(direction, true) ||
+                    link.attributes["rel"]?.equals(direction, true) == true)
+        }?.url
     }
+
+    private fun findNextPageLink(html: String, source: String): String? =
+        WebHtml.links(html, source).firstOrNull { link ->
+            val label = link.title.replace(Regex("[\\s<>»«›‹→←＞＜]+"), "")
+            label in listOf("下一页", "下页", "后页", "继续阅读") || label.equals("nextpage", true)
+        }?.url
 
     private fun validateUrl(value: String): URI {
         val uri = runCatching { URI(value) }.getOrElse { throw IllegalArgumentException("网页地址无效") }

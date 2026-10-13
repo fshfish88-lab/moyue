@@ -15,6 +15,7 @@ import com.moyue.reader.parser.txt.TxtChapterLoader
 import com.moyue.reader.parser.web.WebBookParser
 import com.moyue.reader.parser.web.ReadabilityExtractor
 import com.moyue.reader.parser.web.WebContentFetcher
+import com.moyue.reader.parser.web.WebChapterLoader
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -131,7 +132,7 @@ class RoomReaderDataSource(
     }
     override suspend fun catalogMessage(bookId:Long):String? = withContext(Dispatchers.IO) {
         if(database.bookDao().get(bookId)?.sourceType!=SourceType.WEB)return@withContext null
-        val file=storage.webCache(bookId).resolve("catalog-v9.status")
+        val file=storage.webCache(bookId).resolve("catalog-v10.status")
         if(file.isFile)file.readText() else "目录可能未完整，可点击刷新目录重试"
     }
     override suspend fun chapters(bookId: Long): List<ChapterEntity> = withContext(Dispatchers.IO) {
@@ -159,8 +160,8 @@ class RoomReaderDataSource(
         }.getOrElse { rows }
     }
     private suspend fun refreshWebCatalog(book: BookEntity, rows: List<ChapterEntity>,force:Boolean=false): List<ChapterEntity> {
-        val marker = storage.webCache(book.id).resolve("catalog-v9.done")
-        val status=storage.webCache(book.id).resolve("catalog-v9.status")
+        val marker = storage.webCache(book.id).resolve("catalog-v10.done")
+        val status=storage.webCache(book.id).resolve("catalog-v10.status")
         fun message(text:String){status.parentFile?.mkdirs();status.writeText(text)}
         if (marker.exists() && !force) return rows
         if(force)marker.delete()
@@ -281,10 +282,12 @@ class RoomReaderDataSource(
 
     override suspend fun fetchNext(book: BookEntity, current: ChapterEntity): ChapterEntity? {
         if (book.sourceType != SourceType.WEB) return null
-        val url = current.nextUrl ?: return null
-        require(database.chapterDao().forBook(book.id).none { it.sourceUrl == url }) { "下一章链接重复，请检查网页目录" }
+        val rows = database.chapterDao().forBook(book.id)
+        // Loading may have replaced a legacy next-page link with the real next chapter.
+        val url = rows.firstOrNull { it.id == current.id }?.nextUrl ?: return null
+        require(rows.none { it.sourceUrl == url }) { "下一章链接重复，请检查网页目录" }
         val fetched = webFetcher.fetch(url)
-        val page = webExtractor.extract(fetched.html, fetched.finalUrl)
+        val page = WebChapterLoader(webFetcher::fetch, webExtractor).load(fetched)
         require(database.chapterDao().forBook(book.id).none { it.sourceUrl == page.sourceUrl }) { "网页跳回了已读章节" }
         val index = current.chapterIndex + 1
         val cacheFile = storage.webCache(book.id).resolve("chapter-${index.toString().padStart(5, '0')}.txt")
@@ -302,6 +305,7 @@ class RoomReaderDataSource(
             nextUrl = page.nextUrl,
         )
         val id = database.chapterDao().insertAll(listOf(draft)).single()
+        paginationMarker(cacheFile).writeText(page.sourceUrl)
         database.bookDao().update(book.copy(chapterCount = maxOf(book.chapterCount, index + 1)))
         return draft.copy(id = id)
     }
@@ -312,15 +316,33 @@ class RoomReaderDataSource(
                 chapter.cachePath?.let(::File) ?: storage.webCache(book.id).resolve("catalog-${chapter.id}.txt")
             } else File(requireNotNull(chapter.cachePath) { "章节缓存不存在" })
             var title=chapter.title
-            if (book.sourceType == SourceType.WEB && (!file.isFile || '\uFFFD' in file.readText() || '\uFFFD' in title)) {
-                val page = webFetcher.fetch(requireNotNull(chapter.sourceUrl))
-                val readable = webExtractor.extract(page.html, page.finalUrl)
+            val marker = paginationMarker(file)
+            val validCache = file.isFile && '\uFFFD' !in file.readText() && '\uFFFD' !in title
+            val paginationChecked = marker.isFile && marker.readText() == chapter.sourceUrl
+            if (book.sourceType == SourceType.WEB && (!validCache || !paginationChecked)) {
+                val readable = try {
+                    val page = webFetcher.fetch(requireNotNull(chapter.sourceUrl))
+                    val nextChapterUrl = database.chapterDao().forBook(book.id)
+                        .firstOrNull { it.chapterIndex == chapter.chapterIndex + 1 }?.sourceUrl
+                    WebChapterLoader(webFetcher::fetch, webExtractor).load(page, nextChapterUrl)
+                } catch (error: kotlinx.coroutines.CancellationException) { throw error
+                } catch (error: java.io.IOException) {
+                    if (!validCache) throw error
+                    // Keep old offline content usable, but retry the upgrade on the next open.
+                    storage.webCache(book.id).resolve("catalog-v10.status").writeText(
+                        "正文分页补全失败，暂显示旧缓存；联网后重新打开重试")
+                    null
+                }
+                if (readable != null) {
                 file.parentFile?.mkdirs()
                 require('\uFFFD' !in readable.text) { "网页正文仍存在编码错误，请在网页浏览中确认后重试" }
                 val temp=file.resolveSibling(file.name+".tmp")
                 try {temp.writeText(readable.text);java.nio.file.Files.move(temp.toPath(),file.toPath(),java.nio.file.StandardCopyOption.REPLACE_EXISTING)} finally {temp.delete()}
                 title=readable.title
-                database.chapterDao().update(chapter.copy(title=title,cachePath = file.absolutePath))
+                database.chapterDao().update(chapter.copy(title=title,cachePath = file.absolutePath,
+                    nextUrl = readable.nextUrl, previousUrl = readable.previousUrl ?: chapter.previousUrl))
+                marker.writeText(requireNotNull(chapter.sourceUrl))
+                }
             } else if (!file.isFile) rebuildDerivedCache(book)
             require(file.isFile) { "章节缓存重建失败" }
             val blocks = file.readText().split(Regex("\\R\\s*\\R"))
@@ -329,6 +351,8 @@ class RoomReaderDataSource(
                 .map(ContentBlock::Text)
             ReaderChapter(chapter.id, title, chapter.chapterIndex, blocks)
         }
+
+    private fun paginationMarker(file: File) = file.resolveSibling(file.name + ".pagination-v1")
 
     private suspend fun rebuildDerivedCache(book: BookEntity) {
         epubPackages.clear()

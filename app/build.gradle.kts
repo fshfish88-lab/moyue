@@ -15,9 +15,9 @@ android {
         applicationId = "com.moyue.reader"
         minSdk = 26
         targetSdk = 36
-        versionCode = 30
-        // V1.7.2: full-width shelf row and combined sort/filter/status controls.
-        versionName = "1.7.2"
+        versionCode = 32
+        // V1.7.3: complete web chapter pagination and sibling catalog pages.
+        versionName = "1.7.4"
         testInstrumentationRunner = "com.moyue.reader.feature.annotations.V160Instrumentation"
     }
 
@@ -38,6 +38,7 @@ android {
         buildConfig = true
     }
     packaging.resources.excludes += "/META-INF/{AL2.0,LGPL2.1}"
+    sourceSets.getByName("androidTest").assets.srcDir("src/test/resources")
 }
 
 kotlin {

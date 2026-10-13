@@ -25,6 +25,7 @@ internal fun AnnotatedReaderText(text: String, chapter: ReaderChapter, segments:
     onTap: (Float) -> Unit = {},
     onLayout: (android.text.Layout) -> Unit = {}, onSelecting: (Boolean) -> Unit = {},
     onSelection: (ReaderChapter, ReaderPosition, ReaderPosition, String) -> Unit) {
+    val face = rememberReaderTypeface(preferences.fontFamily) ?: return
     val density = LocalDensity.current
     val fontPx = with(density) { preferences.fontSizeSp.sp.toPx() }
     val ink = MaterialTheme.colorScheme.onBackground.toArgb()
@@ -34,10 +35,11 @@ internal fun AnnotatedReaderText(text: String, chapter: ReaderChapter, segments:
     val layoutCallback by rememberUpdatedState(onLayout)
     val positionSegments by rememberUpdatedState(segments)
     val currentChapter by rememberUpdatedState(chapter)
-    val styled = remember(text, segments, highlights, indent, fontPx) {
+    val styled = remember(text, chapter.blocks, segments, highlights, indent, fontPx) {
         SpannableString(text).apply {
             if (indent && isNotEmpty()) setSpan(LeadingMarginSpan.Standard((fontPx * 2).toInt(), 0), 0, length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
             segments.forEach { segment ->
+                chapter.blocks.getOrNull(segment.blockIndex)?.let { styleBlock(it, segment.displayStart, minOf(segment.displayEnd, length)) }
                 highlights[segment.blockIndex].orEmpty().forEach { mark ->
                     val left = segment.displayStart + (mark.start - segment.sourceStart).coerceIn(0, segment.displayEnd - segment.displayStart)
                     val right = segment.displayStart + (mark.end - segment.sourceStart).coerceIn(0, segment.displayEnd - segment.displayStart)
@@ -77,7 +79,7 @@ internal fun AnnotatedReaderText(text: String, chapter: ReaderChapter, segments:
         }
     } }, update = { view ->
         if (view.textSize != fontPx) view.setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, fontPx)
-        if (view.typeface != preferences.nativeTypeface) view.typeface = preferences.nativeTypeface
+        if (view.typeface != face) view.typeface = face
         val extra = fontPx * (preferences.nativeLineFactor - 1)
         if (view.lineSpacingExtra != extra || view.lineSpacingMultiplier != 1f) view.setLineSpacing(extra, 1f)
         if (view.currentTextColor != ink) view.setTextColor(ink)

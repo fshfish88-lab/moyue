@@ -20,10 +20,10 @@ class WebCatalogLoader(
             ?: initial.finalUrl.takeIf {parser.chapters(initial.html,it).size>=2 && path.endsWith('/')}
             ?: return WebCatalogResult(emptyList(),false,null)
         trace?.record("CATALOG",directory)
-        val prefix=URI(directory).path.orEmpty().substringBeforeLast('/',"")+"/"
         val pending=ArrayDeque<String>();pending.add(directory)
         val visited=mutableSetOf<String>();val entries=linkedMapOf<String,WebCatalogEntry>()
         var complete=true
+        var expectedCount=0
         while(pending.isNotEmpty()) {
             if(visited.size>=maxPages){complete=false;break}
             val url=pending.removeFirst()
@@ -32,6 +32,7 @@ class WebCatalogLoader(
                 catch(e:CancellationException){throw e} catch(_:Exception){complete=false;continue}
             visited.add(page.finalUrl)
             val found=parser.chapters(page.html,page.finalUrl)
+            expectedCount=maxOf(expectedCount,parser.declaredChapterCount(page.html) ?: 0)
             trace?.record("PAGE",page.finalUrl,"entries=${found.size} first=${found.firstOrNull()?.title} last=${found.lastOrNull()?.title}")
             if(found.isEmpty())complete=false
             for(entry in found) {
@@ -41,12 +42,12 @@ class WebCatalogLoader(
             val nextPages=parser.directoryPages(page.html,page.finalUrl)
             nextPages.forEach {trace?.record("NEXT_PAGE",it)}
             for(next in nextPages) {
-                // A footer's site-wide home/index page is never part of this book's directory.
-                if(URI(next).path.orEmpty().startsWith(prefix) && next !in visited && next !in pending)pending.add(next)
+                // directoryPages already enforces the book boundary, including sibling catalogs.
+                if(next !in visited && next !in pending)pending.add(next)
             }
         }
         val ordered=parser.order(entries.values.toList())
-        val finished=complete && !parser.startsAfterFirstChapter(ordered)
+        val finished=complete && ordered.size>=expectedCount && !parser.startsAfterFirstChapter(ordered)
         trace?.record("RESULT",directory,"entries=${ordered.size} pages=${visited.size} complete=$finished")
         return WebCatalogResult(ordered,finished,directory)
     }
