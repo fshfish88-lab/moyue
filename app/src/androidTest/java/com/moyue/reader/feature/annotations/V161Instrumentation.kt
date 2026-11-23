@@ -110,7 +110,7 @@ class V161Instrumentation : Instrumentation() {
                 com.moyue.reader.feature.reader.ReaderScreen(
                     com.moyue.reader.feature.reader.ReaderState(id, "V161回归", chapter, chapters, ReaderPosition(0, 0), 0f, 0f, true, readerPreferences.value, false, false),
                     onBack = {}, onToggleControls = {}, onPrevious = {}, onNext = {}, onChapter = {}, onPosition = { _, _ -> },
-                    onPreferences = { readerPreferences.value = it }, onScrollPosition = { _, _, _ -> }, onPrefetch = {}, annotations = items)
+                    onPreferences = { readerPreferences.value = it }, onScrollPosition = { _, _, _ -> }, annotations = items)
             } } }
             SystemClock.sleep(1000)
             var emptyGap = true

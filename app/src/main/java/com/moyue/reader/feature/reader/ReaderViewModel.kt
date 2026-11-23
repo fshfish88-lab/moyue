@@ -32,9 +32,7 @@ data class ReaderState(
     val canGoPrevious: Boolean,
     val canGoNext: Boolean,
     val error: String? = null,
-    val scrollWindow: List<ReaderChapter> = emptyList(),
     val scrollSession: Int = 0,
-    val prefetching: Boolean = false,
     val catalogMessage:String?=null,
     val catalogRefreshing:Boolean=false,
     val jumpHighlight: String? = null,
@@ -80,7 +78,6 @@ class ReaderViewModel(private val repository: ReaderRepository) : ViewModel() {
             bookId = bookId,
             bookTitle = session.book.title,
             chapter = session.chapter,
-            scrollWindow = listOf(session.chapter),
             chapters = session.chapters,
             position = restored?.let { safeReaderPosition(session.chapter.blocks, it.blockIndex, it.charOffset) } ?: ReaderPosition(0, 0),
             chapterProgress = restored?.chapterProgress ?: 0f,
@@ -98,12 +95,15 @@ class ReaderViewModel(private val repository: ReaderRepository) : ViewModel() {
         }
     }
 
-    suspend fun goNext() = navigate { nextChapter() }
+    suspend fun goNext(expectedSession: Int? = mutableState.value?.scrollSession) =
+        navigate(expectedSession) { nextChapter() }
 
-    private suspend fun navigate(action: suspend () -> Unit) {
+    private suspend fun navigate(expectedSession: Int? = null, action: suspend () -> Unit) {
         adjacentJob?.cancelAndJoin()
         navigation.lock()
         try {
+            // Multiple taps or gestures from the previous screen must not advance the new chapter.
+            if (expectedSession != null && mutableState.value?.scrollSession != expectedSession) return
             cancelPendingSave()
             action()
             mutableState.value = mutableState.value?.copy(error = null)
@@ -128,7 +128,6 @@ class ReaderViewModel(private val repository: ReaderRepository) : ViewModel() {
         save(current)
         mutableState.value = current.copy(
             chapter = chapter,
-            scrollWindow = listOf(chapter),
             scrollSession = current.scrollSession + 1,
             chapters = chapters,
             position = ReaderPosition(0, 0),
@@ -175,7 +174,7 @@ class ReaderViewModel(private val repository: ReaderRepository) : ViewModel() {
             }
             val highlight = if (quote.isBlank() || quote.contains('\n')) null else anchor.put("blockIndex", position.blockIndex).put("charOffset", position.charOffset)
                 .put("endBlock", position.blockIndex).put("endOffset", position.charOffset + quote.length).toString()
-            mutableState.value = loaded.copy(position = position, scrollWindow = listOf(loaded.chapter), scrollSession = loaded.scrollSession + 1, controlsVisible = false, jumpHighlight = highlight)
+            mutableState.value = loaded.copy(position = position, scrollSession = loaded.scrollSession + 1, controlsVisible = false, jumpHighlight = highlight)
         } catch (e: kotlinx.coroutines.CancellationException) { throw e }
         catch (e: Exception) { mutableState.value = mutableState.value?.copy(error = e.message ?: "原文定位失败", controlsVisible = true) }
     }
@@ -194,36 +193,12 @@ class ReaderViewModel(private val repository: ReaderRepository) : ViewModel() {
             val chapter=current.chapter.copy(index=index)
             val storedId=storedChapterIndex?.let {before.chapters.getOrNull(it)?.id}
             storedChapterIndex=storedId?.let {id->chapters.indexOfFirst {it.id==id}.takeIf {it>=0}}
-            mutableState.value=current.copy(chapters=chapters,chapter=chapter,scrollWindow=listOf(chapter),scrollSession=current.scrollSession+1,
+            mutableState.value=current.copy(chapters=chapters,chapter=chapter,scrollSession=current.scrollSession+1,
                 bookProgress=chapterBookProgress(index,current.chapterProgress,chapters.size),
                 canGoPrevious=index>0,canGoNext=index<chapters.lastIndex || !chapters[index].nextUrl.isNullOrBlank(),catalogMessage=message)
         } catch(error:CancellationException){throw error}
           catch(error:Exception){mutableState.value=mutableState.value?.copy(catalogMessage="目录刷新失败：${error.message}")}
         finally {mutableState.value=mutableState.value?.copy(catalogRefreshing=false);navigation.unlock()}
-    }
-
-    suspend fun prefetchFollowing() {
-        adjacentJob?.cancelAndJoin()
-        val before = mutableState.value ?: return
-        // Only prepare the next chapter; repeated layout callbacks must not chain through the book.
-        if ((before.scrollWindow.lastOrNull()?.index ?: before.chapter.index) > before.chapter.index) return
-        if (before.prefetching || !before.preferences.autoNextChapter) return
-        if (!navigation.tryLock()) return
-        mutableState.value = before.copy(prefetching = true)
-        try {
-            val last = before.scrollWindow.lastOrNull() ?: before.chapter
-            val chapter = repository.next(last.index) ?: return
-            val current = mutableState.value ?: return
-            if (current.scrollSession != before.scrollSession) return
-            val window = (current.scrollWindow + chapter).distinctBy { it.id }.filter { it.index >= current.chapter.index - 2 }
-            mutableState.value = current.copy(scrollWindow = window, chapters = repository.chaptersSnapshot(), error = null)
-        } catch (error: CancellationException) { throw error
-        } catch (error: Exception) {
-            mutableState.value = mutableState.value?.copy(error = "下一章预加载失败，可点击重试：${error.message}")
-        } finally {
-            mutableState.value = mutableState.value?.copy(prefetching = false)
-            navigation.unlock()
-        }
     }
 
     suspend fun prefetchAdjacent() {
@@ -241,8 +216,7 @@ class ReaderViewModel(private val repository: ReaderRepository) : ViewModel() {
 
     fun updateScrollPosition(chapterId: Long, position: ReaderPosition, progress: Float) {
         val current = mutableState.value ?: return
-        val chapter = current.scrollWindow.firstOrNull { it.id == chapterId } ?: return
-        updatePosition(current, chapter, position, progress)
+        if (current.chapter.id == chapterId) updatePosition(current, position, progress)
     }
 
     fun toggleControls() {
@@ -255,19 +229,16 @@ class ReaderViewModel(private val repository: ReaderRepository) : ViewModel() {
 
     fun updatePosition(position: ReaderPosition, chapterProgress: Float) {
         val current = mutableState.value ?: return
-        updatePosition(current, current.chapter, position, chapterProgress)
+        updatePosition(current, position, chapterProgress)
     }
 
-    private fun updatePosition(current: ReaderState, chapter: ReaderChapter, position: ReaderPosition, chapterProgress: Float) {
+    private fun updatePosition(current: ReaderState, position: ReaderPosition, chapterProgress: Float) {
         val safeProgress = chapterProgress.coerceIn(0f, 1f)
-        if (current.chapter.id == chapter.id && current.position == position && current.chapterProgress == safeProgress) return
+        if (current.position == position && current.chapterProgress == safeProgress) return
         val updated = current.copy(
-            chapter = chapter,
-            canGoPrevious = chapter.index > 0,
-            canGoNext = chapter.index < current.chapters.lastIndex || !current.chapters[chapter.index].nextUrl.isNullOrBlank(),
             position = position,
             chapterProgress = safeProgress,
-            bookProgress = chapterBookProgress(chapter.index, safeProgress, current.chapters.size),
+            bookProgress = chapterBookProgress(current.chapter.index, safeProgress, current.chapters.size),
         )
         mutableState.value = updated
         pendingSave = updated
@@ -327,15 +298,16 @@ class ReaderViewModel(private val repository: ReaderRepository) : ViewModel() {
         // The reader chose this chapter, so an earlier chapter may legitimately move progress back.
         save(current, regression = true)
         val chapter = repository.chapter(index)
+        val chapters = repository.chaptersSnapshot()
         mutableState.value = current.copy(
             chapter = chapter,
-            scrollWindow = listOf(chapter),
+            chapters = chapters,
             scrollSession = current.scrollSession + 1,
             position = ReaderPosition(0, 0),
             chapterProgress = 0f,
-            bookProgress = chapterBookProgress(index, 0f, current.chapters.size),
+            bookProgress = chapterBookProgress(index, 0f, chapters.size),
             canGoPrevious = index > 0,
-            canGoNext = index < current.chapters.lastIndex || !current.chapters[index].nextUrl.isNullOrBlank(),
+            canGoNext = index < chapters.lastIndex || !chapters[index].nextUrl.isNullOrBlank(),
         )
     }
 

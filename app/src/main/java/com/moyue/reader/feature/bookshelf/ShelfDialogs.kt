@@ -12,6 +12,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.unit.dp
 import com.moyue.reader.core.document.DocumentFormat
+import com.moyue.reader.core.ui.*
 
 @Composable
 fun ShelfNameDialog(title: String, initial: String, busy: Boolean, onDismiss: () -> Unit, allowEmpty: Boolean = false, onSave: (String) -> Unit) {
@@ -94,30 +95,61 @@ fun ShelfCatalogDialog(tag: Boolean, library: ShelfLibrary, busy: Boolean, onDis
     }, confirmButton = { TextButton(enabled = !busy, onClick = onDismiss) { Text("完成") } })
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ShelfFilterDialog(preferences: ShelfPreferences, library: ShelfLibrary, onDismiss: () -> Unit, onApply: (ShelfPreferences) -> Unit) {
     var draft by remember { mutableStateOf(preferences) }
-    AlertDialog(onDismissRequest = onDismiss, title = { Text("筛选书籍") }, text = {
-        Column(Modifier.heightIn(max = 450.dp).verticalScroll(rememberScrollState())) {
-            Text("各维度组合筛选；格式和作者可多选，所选标签需全部匹配。", style = MaterialTheme.typography.bodySmall)
-            Row(verticalAlignment = Alignment.CenterVertically) { Checkbox(draft.favoritesOnly, { draft = draft.copy(favoritesOnly = it) }); Text("仅收藏") }
-            Text("格式", style = MaterialTheme.typography.titleSmall)
-            DocumentFormat.entries.forEach { value -> FilterRow(formatLabel(value), value in draft.formats) {
-                draft = draft.copy(formats = if (it) draft.formats + value else draft.formats - value)
-            } }
-            Text("作者", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 12.dp))
-            (library.books.map { it.book.author.orEmpty() }.toSet() + draft.authors).sorted().forEach { value -> FilterRow(value.ifBlank { "未知作者" }, value in draft.authors) {
-                draft = draft.copy(authors = if (it) draft.authors + value else draft.authors - value)
-            } }
-            Text("标签", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 12.dp))
-            library.tags.forEach { value -> FilterRow(value.name, value.id in draft.tagIds) {
-                draft = draft.copy(tagIds = if (it) draft.tagIds + value.id else draft.tagIds - value.id)
-            } }
-            if (library.tags.isEmpty()) Text("长按书籍可新建和分配标签", style = MaterialTheme.typography.bodySmall)
-            TextButton(onClick = { draft = ShelfPreferences(sort = draft.sort) }) { Text("清除所有筛选") }
+    var advanced by remember { mutableStateOf(false) }
+    var authorQuery by remember { mutableStateOf("") }
+    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        containerColor = MaterialTheme.colorScheme.background, tonalElevation = 0.dp) {
+        Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 24.dp).padding(bottom = 24.dp)) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text(if (advanced) "更多筛选" else "筛选书籍", Modifier.weight(1f), style = MaterialTheme.typography.titleLarge)
+                TextButton({ advanced = !advanced }) { Text(if (advanced) "返回" else "更多") }
+            }
+            if (!advanced) {
+                PaperSection("阅读状态")
+                Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    PaperChip(draft.status == null, { draft = draft.copy(status = null) }, { Text("全部") })
+                    ReadingStatus.entries.forEach { status -> PaperChip(draft.status == status, { draft = draft.copy(status = status) }, { Text(status.label) }) }
+                }
+                PaperSection("内容格式")
+                Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf(DocumentFormat.EPUB, DocumentFormat.TXT, DocumentFormat.PDF, DocumentFormat.MARKDOWN).forEach { value ->
+                        PaperChip(value in draft.formats, { draft = draft.copy(formats = if (value in draft.formats) draft.formats - value else draft.formats + value) }, { Text(formatLabel(value)) })
+                    }
+                }
+                PaperSection("标签（需全部匹配）")
+                Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    library.tags.forEach { tag -> PaperChip(tag.id in draft.tagIds, { draft = draft.copy(tagIds = if (tag.id in draft.tagIds) draft.tagIds - tag.id else draft.tagIds + tag.id) }, { Text(tag.name) }) }
+                }
+                if (library.tags.isEmpty()) Text("长按书籍可新建和分配标签", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                PaperSection("排序")
+                Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    ShelfSort.entries.forEach { sort -> PaperChip(draft.sort == sort, { draft = draft.copy(sort = sort) }, { Text(sort.label) }) }
+                }
+            } else {
+                PaperSection("收藏")
+                FilterRow("仅收藏", draft.favoritesOnly) { draft = draft.copy(favoritesOnly = it) }
+                PaperSection("全部格式")
+                Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    DocumentFormat.entries.forEach { value -> PaperChip(value in draft.formats,
+                        { draft = draft.copy(formats = if (value in draft.formats) draft.formats - value else draft.formats + value) }, { Text(formatLabel(value)) }) }
+                }
+                PaperSection("作者")
+                OutlinedTextField(authorQuery, { authorQuery = it }, placeholder = { Text("搜索作者") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                Column(Modifier.heightIn(max = 240.dp).verticalScroll(rememberScrollState())) {
+                    (library.books.map { it.book.author.orEmpty() }.toSet() + draft.authors).sorted().filter { it.contains(authorQuery, true) }.forEach { author ->
+                        FilterRow(author.ifBlank { "未知作者" }, author in draft.authors) { draft = draft.copy(authors = if (it) draft.authors + author else draft.authors - author) }
+                    }
+                }
+                Text("同一维度任一匹配，不同维度同时匹配，所选标签需全部匹配。", Modifier.padding(top = 16.dp), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            TextButton({ draft = ShelfPreferences(sort = draft.sort) }) { Text("清除所有筛选") }
+            Button({ onApply(draft) }, Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("显示 ${shelfBooks(library.books, draft).size} 本书 · 应用筛选") }
         }
-    }, confirmButton = { TextButton(onClick = { onApply(draft) }) { Text("应用筛选") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } })
+    }
 }
 
 @Composable

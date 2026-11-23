@@ -46,6 +46,8 @@ import kotlinx.coroutines.withContext
 
 private sealed interface AppScreen {
     data object Shelf : AppScreen
+    data object Library : AppScreen
+    data object Collections : AppScreen
     data object Settings : AppScreen
     data object Annotations : AppScreen
     data object Search : AppScreen
@@ -170,9 +172,16 @@ fun MoyueApp(container: MoyueContainer, sharedUrl: String? = null, shareReceiver
                     onSettings = { screen = AppScreen.Settings },
                     onGlobalSearch = { screen = AppScreen.Search },
                     onAnnotations = { screen = AppScreen.Annotations },
+                    onLibrary = { screen = AppScreen.Library },
+                    onCollections = { screen = AppScreen.Collections },
                 )
             }
-            AppScreen.Annotations -> com.moyue.reader.feature.annotations.AnnotationCenter(container, { screen = AppScreen.Shelf }, { id, anchor -> openContent(id, anchor = anchor) })
+            AppScreen.Library, AppScreen.Collections -> com.moyue.reader.feature.bookshelf.LibraryScreen(
+                container, destination == AppScreen.Collections, { screen = AppScreen.Shelf },
+                { value -> scope.launch { try { container.shelfPreferences.update { value }; screen = AppScreen.Shelf }
+                    catch (e: Exception) { if (e is kotlinx.coroutines.CancellationException) throw e; snackbar.showSnackbar("筛选保存失败，请重试") } } },
+                { screen = AppScreen.Collections }, { showImport = true }, { screen = AppScreen.Annotations }, { screen = AppScreen.Settings })
+            AppScreen.Annotations -> com.moyue.reader.feature.annotations.AnnotationCenter(container, { screen = AppScreen.Shelf }, { id, anchor -> openContent(id, anchor = anchor) }, { screen = AppScreen.Settings })
             AppScreen.Search -> com.moyue.reader.feature.annotations.GlobalSearch(container, { screen = AppScreen.Shelf }, { id, anchor -> openContent(id, anchor = anchor) })
             AppScreen.Settings -> {
                 val updateState by container.updates.state.collectAsState()
@@ -193,6 +202,8 @@ fun MoyueApp(container: MoyueContainer, sharedUrl: String? = null, shareReceiver
                     onAutomaticUpdates = container.updates::setAutomatic,
                     onCheckUpdates = container.updates::checkManually,
                     onOpenUpdate = container.updates::showPrompt,
+                    onAnnotations = { screen = AppScreen.Annotations },
+                    onLibrary = { screen = AppScreen.Library },
                 )
             }
             is AppScreen.Reader -> ReaderDestination(
@@ -200,6 +211,7 @@ fun MoyueApp(container: MoyueContainer, sharedUrl: String? = null, shareReceiver
                 container,
                 preferences,
                 onBack = { screen = AppScreen.Shelf },
+                onSearch = { screen = AppScreen.Search },
                 onPreferences = { value -> scope.launch { container.preferences.update { value } } },
             )
             is AppScreen.Markdown -> com.moyue.reader.feature.markdown.MarkdownScreen(
@@ -220,6 +232,7 @@ fun MoyueApp(container: MoyueContainer, sharedUrl: String? = null, shareReceiver
                 onBack = { screen = AppScreen.Shelf },
                 onRead = { openContent(destination.bookId) },
                 onDeleted = { screen = AppScreen.Shelf },
+                onChapter = { index -> screen = AppScreen.Reader(destination.bookId, index) },
             )
             is AppScreen.Browser -> SafeWebViewScreen(
                 initialUrl = destination.url,
@@ -277,6 +290,7 @@ private fun ReaderDestination(
     container: MoyueContainer,
     preferences: ReaderPreferences,
     onBack: () -> Unit,
+    onSearch: () -> Unit,
     onPreferences: (ReaderPreferences) -> Unit,
 ) {
     val store = remember(destination.bookId) { androidx.lifecycle.ViewModelStore() }
@@ -363,15 +377,20 @@ private fun ReaderDestination(
             annotations = readerAnnotations,
             onSelection = { chapter, start, end, type -> annotationDraft = com.moyue.reader.feature.annotations.textDraft(current.bookId, chapter, start, end, type) },
             onAnnotations = { showAnnotations = true },
+            onSearch = { scope.launch { viewModel.flushProgressOnBack(); onSearch() } },
+            onOpenAnnotation = { a -> scope.launch { viewModel.jumpToAnchor(a.anchorJson) } },
             onBookmark = { annotationDraft = com.moyue.reader.feature.annotations.textDraft(current.bookId, current.chapter, current.position, current.position, "BOOKMARK") },
             onBack = { scope.launch { viewModel.flushProgressOnBack(); onBack() } },
             onToggleControls = viewModel::toggleControls,
             onPrevious = { scope.launch { viewModel.goPrevious() } },
-            onNext = { scope.launch { viewModel.goNext() } },
+            onNext = { scope.launch { viewModel.goNext(current.scrollSession) } },
             onChapter = { scope.launch { viewModel.goTo(it) } },
-            onPosition = viewModel::updatePosition,
-            onScrollPosition = viewModel::updateScrollPosition,
-            onPrefetch = { scope.launch { viewModel.prefetchFollowing() } },
+            onPosition = { position, progress ->
+                if (viewModel.state.value?.scrollSession == current.scrollSession) viewModel.updatePosition(position, progress)
+            },
+            onScrollPosition = { chapter, position, progress ->
+                if (viewModel.state.value?.scrollSession == current.scrollSession) viewModel.updateScrollPosition(chapter, position, progress)
+            },
             onRefreshCatalog = { scope.launch { viewModel.refreshCatalog() } },
             onCatalogSource = {scope.launch {
                 catalogSource=withContext(Dispatchers.IO) {
@@ -393,7 +412,12 @@ private fun DetailDestination(
     onBack: () -> Unit,
     onRead: () -> Unit,
     onDeleted: () -> Unit,
+    onChapter: (Int) -> Unit,
 ) {
+    val library by container.shelves.library.collectAsState(initial = com.moyue.reader.feature.bookshelf.ShelfLibrary())
+    var showManagement by remember { mutableStateOf(false) }
+    var managedDelete by remember { mutableStateOf(false) }
+    var detailError by remember { mutableStateOf<String?>(null) }
     val books by container.database.bookDao().observeAll().collectAsState(initial = null)
     val book = books?.firstOrNull { it.id == bookId }
     var chapters by remember(bookId) { mutableStateOf<List<ChapterEntity>>(emptyList()) }
@@ -418,13 +442,31 @@ private fun DetailDestination(
         onRead,
         onDelete = {
             scope.launch {
-                deleteShelfBook(container, bookId)
-                onDeleted()
+                try { deleteShelfBook(container, bookId); onDeleted() }
+                catch (e: Exception) { if (e is kotlinx.coroutines.CancellationException) throw e; detailError = e.message ?: "删除失败，请重试" }
             }
         },
         documentMetadata = documentMetadata,
         imageSize = imageSize,
+        favorite = library.books.firstOrNull { it.book.id == bookId }?.management?.firstOrNull()?.favorite == true,
+        onFavorite = { scope.launch { try {
+            val favorite = library.books.firstOrNull { it.book.id == bookId }?.management?.firstOrNull()?.favorite == true
+            container.shelves.favorite(setOf(bookId), !favorite)
+        } catch (e: Exception) { if (e is kotlinx.coroutines.CancellationException) throw e; detailError = e.message ?: "收藏保存失败" } } },
+        onManage = { showManagement = true }, onChapter = onChapter,
     )
+    if (showManagement) com.moyue.reader.feature.bookshelf.BookManagementSheet(bookId, library, container.shelves,
+        { showManagement = false }, { showManagement = false; managedDelete = true })
+    if (managedDelete) androidx.compose.material3.AlertDialog(onDismissRequest = { managedDelete = false },
+        title = { androidx.compose.material3.Text("删除《${book.title}》？") },
+        text = { androidx.compose.material3.Text("将删除应用内副本、缓存、进度和标注。外部原文件不受影响，此操作无法撤销。") },
+        confirmButton = { androidx.compose.material3.Button({ managedDelete = false; scope.launch {
+            try { deleteShelfBook(container, bookId); onDeleted() }
+            catch (e: Exception) { if (e is kotlinx.coroutines.CancellationException) throw e; detailError = e.message ?: "删除失败，请重试" }
+        } }) { androidx.compose.material3.Text("确认删除") } },
+        dismissButton = { androidx.compose.material3.TextButton({ managedDelete = false }) { androidx.compose.material3.Text("取消") } })
+    detailError?.let { message -> androidx.compose.material3.AlertDialog(onDismissRequest = { detailError = null }, text = { androidx.compose.material3.Text(message) },
+        confirmButton = { androidx.compose.material3.TextButton({ detailError = null }) { androidx.compose.material3.Text("知道了") } }) }
 }
 
 private suspend fun deleteShelfBook(container: MoyueContainer, bookId: Long) = withContext(Dispatchers.IO) {

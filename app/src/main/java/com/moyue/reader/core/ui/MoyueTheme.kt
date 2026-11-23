@@ -16,6 +16,7 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.unit.dp
 import androidx.core.graphics.toColorInt
 import androidx.core.view.WindowCompat
 import com.moyue.reader.core.settings.ReaderPreferences
@@ -58,7 +59,7 @@ val MoyueWordmark = TextStyle(
  * the lavender #F3EDF7 family. That is the stray purple block in bug反馈/img_001.jpg.
  */
 private val AppScheme = lightColorScheme(
-    primary = MoyueColors.Accent,
+    primary = MoyueColors.Ink,
     onPrimary = Color.White,
     primaryContainer = MoyueColors.AccentSoft,
     onPrimaryContainer = MoyueColors.AccentDeep,
@@ -75,7 +76,7 @@ private val AppScheme = lightColorScheme(
     onBackground = MoyueColors.Ink,
     surface = MoyueColors.Card,
     onSurface = MoyueColors.Ink,
-    surfaceVariant = MoyueColors.AppBackground,
+    surfaceVariant = Color(0xFFE9E5DE),
     onSurfaceVariant = MoyueColors.MutedInk,
     surfaceTint = Color.Transparent,
     surfaceBright = MoyueColors.Card,
@@ -184,7 +185,13 @@ fun SystemBarsColor(background: Color, darkIcons: Boolean) {
 @Composable
 fun MoyueTheme(content: @Composable () -> Unit) {
     SystemBarsColor(background = MoyueColors.AppBackground, darkIcons = true)
-    MaterialTheme(colorScheme = AppScheme, typography = MoyueTypography, content = content)
+    MaterialTheme(colorScheme = AppScheme, typography = MoyueTypography,
+        shapes = androidx.compose.material3.Shapes(
+            extraSmall = androidx.compose.foundation.shape.RoundedCornerShape(8.dp),
+            small = androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
+            medium = androidx.compose.foundation.shape.RoundedCornerShape(16.dp),
+            large = androidx.compose.foundation.shape.RoundedCornerShape(20.dp),
+            extraLarge = androidx.compose.foundation.shape.RoundedCornerShape(24.dp)), content = content)
 }
 
 @Composable

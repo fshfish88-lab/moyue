@@ -15,9 +15,8 @@ android {
         applicationId = "com.moyue.reader"
         minSdk = 26
         targetSdk = 36
-        versionCode = 32
-        // V1.7.3: complete web chapter pagination and sibling catalog pages.
-        versionName = "1.7.4"
+        versionCode = 33
+        versionName = "1.7.5"
         testInstrumentationRunner = "com.moyue.reader.feature.annotations.V160Instrumentation"
     }
 

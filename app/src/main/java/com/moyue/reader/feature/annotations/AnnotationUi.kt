@@ -10,7 +10,13 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import com.moyue.reader.core.ui.*
+import com.moyue.reader.core.ui.PaperChip as FilterChip
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.moyue.reader.MoyueContainer
 import com.moyue.reader.core.database.*
@@ -39,8 +45,11 @@ fun AnnotationEditor(draft: AnnotationDraft, existing: AnnotationEntity? = null,
 
 @Composable
 private fun AnnotationRow(item: AnnotationEntity, title: String? = null, onOpen: () -> Unit, onEdit: () -> Unit, onDelete: () -> Unit) {
-    Column(Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
-        Column(Modifier.fillMaxWidth().clickable(onClick = onOpen).padding(horizontal = 20.dp)) {
+    PaperCard(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 8.dp)) {
+        Column(
+            Modifier.fillMaxWidth().clickable(onClick = onOpen).padding(start = 20.dp, top = 14.dp, end = 20.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
             title?.let { Text(it, style = MaterialTheme.typography.titleSmall) }
             Text("${typeLabel(item.type)} · ${item.location} · ${annotationColors[item.color].orEmpty()}", style = MaterialTheme.typography.labelMedium)
             if (item.selectedText.isNotBlank()) Text(item.selectedText, maxLines = 5)
@@ -49,7 +58,6 @@ private fun AnnotationRow(item: AnnotationEntity, title: String? = null, onOpen:
         Row(Modifier.padding(horizontal = 12.dp)) {
             TextButton(onOpen) { Text("返回原文") }; TextButton(onEdit) { Text("编辑") }; TextButton(onDelete) { Text("删除") }
         }
-        HorizontalDivider()
     }
 }
 
@@ -89,7 +97,7 @@ fun AnnotationTools(container: MoyueContainer, bookId: Long, draft: AnnotationDr
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun AnnotationCenter(container: MoyueContainer, onBack: () -> Unit, onOpen: (Long, String) -> Unit) {
+fun AnnotationCenter(container: MoyueContainer, onBack: () -> Unit, onOpen: (Long, String) -> Unit, onSettings: () -> Unit = {}) {
     val items by container.database.annotationDao().observeAll().collectAsState(initial = emptyList())
     var bookId by remember { mutableStateOf<Long?>(null) }
     var type by remember { mutableStateOf<String?>(null) }
@@ -101,16 +109,21 @@ fun AnnotationCenter(container: MoyueContainer, onBack: () -> Unit, onOpen: (Lon
     val snackbar = remember { SnackbarHostState() }
     val filtered = items.filter { (bookId == null || it.annotation.bookId == bookId) && (type == null || it.annotation.type == type) && (color == null || it.annotation.color == color) &&
         (query.isBlank() || it.bookTitle.contains(query, true) || it.annotation.selectedText.contains(query, true) || it.annotation.note.contains(query, true)) }
+    var showFilters by remember { mutableStateOf(false) }
     var exportText by remember { mutableStateOf("") }
     val export = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/markdown")) { uri -> if (uri != null) scope.launch {
         try { withContext(Dispatchers.IO) { requireNotNull(container.applicationContext.contentResolver.openOutputStream(uri, "wt")).use { it.write(exportText.toByteArray(Charsets.UTF_8)) } }; snackbar.showSnackbar("摘录已导出") }
         catch (e: Exception) { snackbar.showSnackbar("导出失败：${e.message}") }
     } }
-    Scaffold(topBar = { TopAppBar(title = { Text("摘录 · ${filtered.size}") }, navigationIcon = { TextButton(onBack) { Text("返回") } },
-        actions = { TextButton(enabled = filtered.isNotEmpty(), onClick = { exportText = container.annotations.export(filtered); export.launch("墨阅摘录.md") }) { Text("导出") } }) }, snackbarHost = { SnackbarHost(snackbar) }) { padding ->
+    Scaffold(topBar = { TopAppBar(title = { Text("摘录与笔记") }, navigationIcon = { TextButton(onBack) { Text("返回") } },
+        actions = { TextButton(enabled = filtered.isNotEmpty(), onClick = { exportText = container.annotations.export(filtered); export.launch("墨阅摘录.md") }) { Text("导出") } }) }, bottomBar = { PaperNavigation(1, onBack, {}, onSettings) }, snackbarHost = { SnackbarHost(snackbar) }) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
-            OutlinedTextField(query, { query = it }, placeholder = { Text("搜索摘录、笔记或书名") }, singleLine = true, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp))
-            Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(Modifier.fillMaxWidth().padding(horizontal = 24.dp), verticalAlignment = Alignment.CenterVertically) {
+                OutlinedTextField(query, { query = it }, placeholder = { Text("搜索摘录、笔记或书名") }, singleLine = true, modifier = Modifier.weight(1f),
+                    leadingIcon = { Icon(PaperIcons.Search, null, Modifier.size(20.dp)) }, shape = RoundedCornerShape(28.dp))
+                IconButton({ showFilters = !showFilters }) { Icon(PaperIcons.Filter, "筛选摘录") }
+            }
+            if (showFilters) Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 24.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 FilterChip(bookId == null, { bookId = null }, label = { Text("所有书籍") })
                 items.distinctBy { it.annotation.bookId }.forEach { item -> FilterChip(bookId == item.annotation.bookId, { bookId = item.annotation.bookId }, label = { Text(item.bookTitle, maxLines = 1) }) }
             }
@@ -118,7 +131,7 @@ fun AnnotationCenter(container: MoyueContainer, onBack: () -> Unit, onOpen: (Lon
                 FilterChip(type == null, { type = null }, label = { Text("全部类型") })
                 listOf("BOOKMARK", "HIGHLIGHT", "NOTE").forEach { key -> FilterChip(type == key, { type = key }, label = { Text(typeLabel(key)) }) }
             }
-            Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            if (showFilters) Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 24.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 FilterChip(color == null, { color = null }, label = { Text("全部颜色") })
                 annotationColors.forEach { (key, name) -> FilterChip(color == key, { color = key }, label = { Text(name) }) }
             }
@@ -156,21 +169,29 @@ fun GlobalSearch(container: MoyueContainer, onBack: () -> Unit, onOpen: (Long, S
     }
     val q = query.trim().take(120)
     val matchedBooks = if (q.isEmpty()) emptyList() else books.filter { it.title.contains(q, true) }
-    Scaffold(topBar = { TopAppBar(title = { Text("全局搜索") }, navigationIcon = { TextButton(onBack) { Text("返回") } }, actions = { TextButton({ container.searchIndexer.refresh() }) { Text("重建索引") } }) }) { padding ->
+    Scaffold(topBar = { CenterAlignedTopAppBar(title = { Text("全局搜索") }, navigationIcon = { TextButton(onBack) { Text("返回") } }, actions = { TextButton({ container.searchIndexer.refresh() }) { Text("重建索引") } }) }) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
-            OutlinedTextField(query, { query = it.take(120); limit = 40 }, singleLine = true, placeholder = { Text("搜索名称、小说目录、文档正文") }, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp))
-            Row(Modifier.padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) { listOf("全部", "名称", "目录", "正文").forEach { name -> FilterChip(tab == name, { tab = name; limit = 40 }, label = { Text(name) }) } }
+            OutlinedTextField(query, { query = it.take(120); limit = 40 }, singleLine = true, placeholder = { Text("搜索名称、小说目录、文档正文") }, modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp), leadingIcon = { Icon(PaperIcons.Search, null, Modifier.size(20.dp)) }, shape = RoundedCornerShape(28.dp))
+            Box(Modifier.fillMaxWidth().padding(horizontal = 24.dp), contentAlignment = Alignment.Center) {
+                Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    listOf("全部", "名称", "目录", "正文").forEach { name ->
+                        FilterChip(tab == name, { tab = name; limit = 40 }, label = { Text(name) })
+                    }
+                }
+            }
             val pending = states.count { it.status == "INDEXING" }
-            Text(if (pending > 0) "正在更新 $pending 项搜索索引…" else "已索引 ${states.count { it.status in setOf("READY", "PARTIAL") }} 项；小说仅搜索名称和目录", Modifier.padding(horizontal = 16.dp), style = MaterialTheme.typography.labelSmall)
+            Text(if (pending > 0) "正在更新 $pending 项搜索索引…" else "已索引 ${states.count { it.status in setOf("READY", "PARTIAL") }} 项；小说仅搜索名称和目录",
+                Modifier.fillMaxWidth().padding(horizontal = 24.dp), style = MaterialTheme.typography.labelSmall, textAlign = TextAlign.Center)
             val special = states.filter { it.status in setOf("SCAN", "LOCKED", "ERROR", "PARTIAL") }
             if (q.isEmpty()) special.take(4).forEach { s -> Text("${books.firstOrNull { it.id == s.bookId }?.title.orEmpty()}：${s.message}", Modifier.padding(horizontal = 16.dp), style = MaterialTheme.typography.labelSmall) }
             if (busy) LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 8.dp))
             error?.let { Text(it, Modifier.padding(16.dp), color = MaterialTheme.colorScheme.error) }
             LazyColumn(Modifier.weight(1f)) {
-                if (tab in setOf("全部", "名称")) items(matchedBooks, key = { "book:${it.id}" }) { book -> ListItem(headlineContent = { Text(book.title) }, supportingContent = { Text(book.author.orEmpty()) }, modifier = Modifier.clickable { onOpen(book.id, null) }) }
+                if (tab in setOf("全部", "名称")) items(matchedBooks, key = { "book:${it.id}" }) { book -> ListItem(headlineContent = { Text(book.title) }, supportingContent = { Text(book.author.orEmpty()) }, leadingContent = { BookCover(book.title, book.author, book.coverPath, Modifier.width(56.dp).height(80.dp), book.sourceType) },
+                    modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp).clip(RoundedCornerShape(16.dp)).clickable { onOpen(book.id, null) }) }
                 if (tab in setOf("全部", "目录", "正文")) items(hits.take(limit), key = { "text:${it.chunk.id}" }) { hit ->
                     val index = hit.chunk.text.indexOf(q, ignoreCase = true).coerceAtLeast(0)
-                    ListItem(headlineContent = { Text("${hit.bookTitle} · ${hit.chunk.location}") }, supportingContent = { Text(hit.chunk.text.substring((index - 35).coerceAtLeast(0), (index + q.length + 80).coerceAtMost(hit.chunk.text.length)), maxLines = 4) }, modifier = Modifier.clickable {
+                    ListItem(headlineContent = { Text("${hit.bookTitle} · ${hit.chunk.location}") }, supportingContent = { Text(hit.chunk.text.substring((index - 35).coerceAtLeast(0), (index + q.length + 80).coerceAtMost(hit.chunk.text.length)), maxLines = 4) }, modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp).clip(RoundedCornerShape(16.dp)).clickable {
                         val a = JSONObject(hit.chunk.anchorJson)
                         if (hit.chunk.partKey.startsWith("catalog:")) {
                             onOpen(hit.chunk.bookId, a.toString())

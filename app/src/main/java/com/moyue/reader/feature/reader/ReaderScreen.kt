@@ -9,6 +9,8 @@ import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -38,6 +40,8 @@ import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import com.moyue.reader.core.ui.PaperIcons
+import com.moyue.reader.core.ui.PaperTool
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -71,6 +75,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.changedToUpIgnoreConsumed
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -82,6 +88,7 @@ import com.moyue.reader.core.settings.SpacingLevel
 import com.moyue.reader.core.ui.ReaderDisplayEffects
 import com.moyue.reader.core.ui.MoyueReaderTheme
 import com.moyue.reader.core.ui.MoyueSpacing
+import kotlin.math.abs
 
 @OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
 @Composable
@@ -95,7 +102,6 @@ fun ReaderScreen(
     onPosition: (ReaderPosition, Float) -> Unit,
     onPreferences: (ReaderPreferences) -> Unit,
     onScrollPosition: (Long, ReaderPosition, Float) -> Unit,
-    onPrefetch: () -> Unit,
     onRefreshCatalog:()->Unit={},
     onCatalogSource:(()->Unit)?=null,
     onCatalogDiagnostic:(()->Unit)?=null,
@@ -103,16 +109,17 @@ fun ReaderScreen(
     onSelection: (com.moyue.reader.core.model.ReaderChapter, ReaderPosition, ReaderPosition, String) -> Unit = { _, _, _, _ -> },
     onAnnotations: () -> Unit = {},
     onBookmark: () -> Unit = {},
+    onSearch: () -> Unit = {},
+    onOpenAnnotation: (com.moyue.reader.core.database.AnnotationEntity) -> Unit = {},
 ) {
     val pageCache = remember { ReaderPageCache() }
     var showChapters by remember { mutableStateOf(false) }
     var showSettings by remember { mutableStateOf(false) }
     val preferences = state.preferences
     // Toolbar visibility and catalog state do not affect text shaping or scroll contents.
-    val content = remember(state.chapter, state.position, preferences, state.canGoPrevious,
-        state.canGoNext, state.error, state.scrollWindow, state.prefetching) {
+    val content = remember(state.chapter, state.position, preferences, state.canGoPrevious, state.canGoNext) {
         ReaderContentState(state.chapter, state.position, preferences, state.canGoPrevious,
-            state.canGoNext, state.error, state.scrollWindow, state.prefetching)
+            state.canGoNext)
     }
     val contentAnnotations = remember(annotations) { indexReaderAnnotations(annotations) }
     val latestSelection by rememberUpdatedState(onSelection)
@@ -131,9 +138,9 @@ fun ReaderScreen(
                     detectTapGestures { toggleControls() }
                 } else Modifier),
         ) {
-            key(state.scrollSession, if (preferences.pageMode == PageMode.SCROLL) 0L else state.chapter.id, preferences.pageMode) {
+            key(state.scrollSession, state.chapter.id, preferences.pageMode) {
             if (preferences.pageMode == PageMode.SCROLL) {
-                ScrollingChapter(content, onScrollPosition, onPrefetch, onNext, onToggleControls, contentAnnotations, contentSelection)
+                ScrollingChapter(content, onScrollPosition, onNext, onToggleControls, contentAnnotations, contentSelection)
             } else {
                 PagedChapter(content, pageCache, onPosition, onPrevious, onNext, onToggleControls, contentAnnotations, contentSelection)
             }
@@ -149,23 +156,22 @@ fun ReaderScreen(
                     colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
                     title = {
                         Text(
-                            state.chapter.title.ifBlank { state.bookTitle },
-                            style = MaterialTheme.typography.titleMedium,
+                            state.bookTitle,
+                            style = MaterialTheme.typography.bodySmall,
                             maxLines = 1,
                             overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                         )
                     },
                     navigationIcon = {
                         IconButton(onClick = onBack) {
-                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回书架")
+                            Icon(PaperIcons.Back, contentDescription = "返回书架")
                         }
                     },
                     actions = {
-                        TextButton(onBookmark) { Text("书签") }
-                        TextButton(onAnnotations) { Text("标注") }
-                        IconButton(onClick = { showSettings = true }) {
-                            Icon(Icons.Default.MoreVert, contentDescription = "更多阅读设置")
-                        }
+                        IconButton(onClick = { showSettings = true }) { Text("Aa") }
+                        IconButton(onSearch) { Icon(PaperIcons.Search, "搜索书籍") }
+                        IconButton(onBookmark) { Icon(PaperIcons.Bookmark, "书签") }
+                        IconButton(onAnnotations) { Icon(PaperIcons.Notes, "标注") }
                     },
                 )
             }
@@ -190,6 +196,9 @@ fun ReaderScreen(
                 state.chapter.index,
                 onSelect = { showChapters = false; onChapter(it) },
                 onDismiss = { showChapters = false },
+                annotations = annotations.filter { it.id > 0 },
+                onAnnotation = { showChapters = false; onOpenAnnotation(it) },
+                onManageAnnotations = { showChapters = false; onAnnotations() },
                 catalogMessage=state.catalogMessage,
                 refreshing=state.catalogRefreshing,
                 onRefresh=onRefreshCatalog.takeIf {state.catalogMessage!=null},
@@ -230,69 +239,58 @@ private fun ReaderToolbar(visible: Boolean, edge: Int, modifier: Modifier, conte
     ) { content() }
 }
 
-private data class ScrollItem(val chapter: com.moyue.reader.core.model.ReaderChapter, val block: Int) {
-    val key: String get() = "${chapter.id}:$block"
-}
-
 private data class ReaderContentState(
     val chapter: com.moyue.reader.core.model.ReaderChapter,
     val position: ReaderPosition,
     val preferences: ReaderPreferences,
     val canGoPrevious: Boolean,
     val canGoNext: Boolean,
-    val error: String?,
-    val scrollWindow: List<com.moyue.reader.core.model.ReaderChapter>,
-    val prefetching: Boolean,
 )
 
 @Composable
-private fun ScrollingChapter(state: ReaderContentState, onPosition: (Long, ReaderPosition, Float) -> Unit, onPrefetch: () -> Unit, onNext: () -> Unit, onToggleControls: () -> Unit,
+private fun ScrollingChapter(state: ReaderContentState, onPosition: (Long, ReaderPosition, Float) -> Unit, onNext: () -> Unit, onToggleControls: () -> Unit,
     annotations: Map<Long, List<IndexedReaderAnnotation>>, onSelection: (com.moyue.reader.core.model.ReaderChapter, ReaderPosition, ReaderPosition, String) -> Unit) {
-    val window = state.scrollWindow.ifEmpty { listOf(state.chapter) }
-    val highlights = remember(window, annotations) { window.associate { it.id to chapterHighlights(it, annotations[it.id].orEmpty()) } }
-    val entries = remember(window) { window.flatMap { chapter -> listOf(ScrollItem(chapter, -1)) + chapter.blocks.indices.map { ScrollItem(chapter, it) } } }
+    val chapter = state.chapter
+    val highlights = remember(chapter, annotations) { chapterHighlights(chapter, annotations[chapter.id].orEmpty()) }
     val initial = remember {
-        val block = if (state.position.blockIndex == 0 && state.position.charOffset == 0) -1 else state.position.blockIndex
-        entries.indexOfFirst { it.chapter.id == state.chapter.id && it.block == block }.coerceAtLeast(0)
+        if (state.position == ReaderPosition(0, 0)) 0 else state.position.blockIndex + 1
     }
     val listState = rememberLazyListState(initial)
-    val layouts = remember { mutableStateMapOf<String, android.text.Layout>() }
+    val layouts = remember { mutableStateMapOf<Int, android.text.Layout>() }
     var restored by remember { mutableStateOf(state.position.charOffset == 0) }
+    var selecting by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) {
         if (!restored) {
-            val item = entries.getOrNull(initial)
-            if (item != null) {
-                val layout = snapshotFlow { layouts[item.key] }.filterNotNull().first()
+            if (initial - 1 in chapter.blocks.indices) {
+                val layout = snapshotFlow { layouts[initial - 1] }.filterNotNull().first()
                 val line = layout.getLineForOffset(state.position.charOffset.coerceAtMost(layout.text.length))
                 listState.scrollToItem(initial, layout.getLineTop(line).toInt())
             }
             restored = true
         }
     }
-    val itemsByKey = remember(entries) { entries.associateBy { it.key } }
-    val indexesByKey = remember(entries) { entries.mapIndexed { index, item -> item.key to index }.toMap() }
     val latestPosition by rememberUpdatedState(onPosition)
-    val latestPrefetch by rememberUpdatedState(onPrefetch)
-    LaunchedEffect(entries, restored) {
+    val latestNext by rememberUpdatedState(onNext)
+    LaunchedEffect(chapter, restored) {
         if (!restored) return@LaunchedEffect
         snapshotFlow {
             val first = listState.layoutInfo.visibleItemsInfo.firstOrNull { it.index == listState.firstVisibleItemIndex }
-            val entry = itemsByKey[first?.key] ?: return@snapshotFlow null
+                ?: return@snapshotFlow null
+            // The heading and chapter-end button sit outside the source blocks.
+            val lastBlock = chapter.blocks.lastIndex.coerceAtLeast(0)
+            val block = (first.index - 1).coerceIn(0, lastBlock)
             val pixels = listState.firstVisibleItemScrollOffset
-            val layout = layouts[entry.key]
+            val layout = layouts[block].takeIf { first.index == block + 1 }
             val offset = layout?.getLineStart(layout.getLineForVertical(pixels)) ?: 0
-            Triple(entry.chapter.id, ReaderPosition(entry.block.coerceAtLeast(0), offset),
-                (entry.block.coerceAtLeast(0).toFloat() / entry.chapter.blocks.size.coerceAtLeast(1)).coerceIn(0f, 1f))
-        }.filterNotNull().distinctUntilChanged().collect { (chapter, position, progress) ->
-            latestPosition(chapter, position, progress)
+            val progress = when {
+                !listState.canScrollForward -> 1f
+                first.index == 0 -> 0f
+                else -> ((block + pixels.toFloat() / first.size.coerceAtLeast(1)) / chapter.blocks.size.coerceAtLeast(1)).coerceIn(0f, 1f)
+            }
+            ReaderPosition(block, offset) to progress
+        }.filterNotNull().distinctUntilChanged().collect { (position, progress) ->
+            latestPosition(chapter.id, position, progress)
         }
-    }
-    LaunchedEffect(entries, state.chapter.id, state.preferences.autoNextChapter, state.error) {
-        if (!state.preferences.autoNextChapter || state.error != null) return@LaunchedEffect
-        snapshotFlow {
-            val last = indexesByKey[listState.layoutInfo.visibleItemsInfo.lastOrNull()?.key] ?: -1
-            last >= 0 && last >= entries.lastIndex - 5
-        }.distinctUntilChanged().collect { nearEnd -> if (nearEnd) latestPrefetch() }
     }
     val safe = WindowInsets.safeDrawing.asPaddingValues()
     val direction = LocalLayoutDirection.current
@@ -300,7 +298,26 @@ private fun ScrollingChapter(state: ReaderContentState, onPosition: (Long, Reade
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
         return
     }
-    LazyColumn(state = listState, modifier = Modifier.fillMaxSize(),
+    val continueAtEnd = if (state.preferences.autoNextChapter && state.canGoNext) Modifier.pointerInput(listState) {
+        awaitEachGesture {
+            val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+            // An existing drag or fling can reach the end but cannot carry into the next chapter.
+            if (selecting || listState.isScrollInProgress || listState.canScrollForward ||
+                listState.layoutInfo.totalItemsCount == 0) return@awaitEachGesture
+            while (true) {
+                val event = awaitPointerEvent(PointerEventPass.Initial)
+                val finger = event.changes.singleOrNull() ?: break
+                if (finger.changedToUpIgnoreConsumed()) {
+                    val distance = down.position - finger.position
+                    if (!selecting && !listState.canScrollForward &&
+                        distance.y > maxOf(36.dp.toPx(), abs(distance.x))) latestNext()
+                    break
+                }
+                if (!finger.pressed) break
+            }
+        }
+    } else Modifier
+    LazyColumn(state = listState, modifier = Modifier.fillMaxSize().then(continueAtEnd),
         contentPadding = PaddingValues(
             start = state.preferences.margin.dpValue + safe.calculateLeftPadding(direction),
             end = state.preferences.margin.dpValue + safe.calculateRightPadding(direction),
@@ -308,9 +325,9 @@ private fun ScrollingChapter(state: ReaderContentState, onPosition: (Long, Reade
             bottom = safe.calculateBottomPadding() + 40.dp,
         ),
         verticalArrangement = Arrangement.spacedBy(state.preferences.paragraphSpacing.dpValue)) {
-        items(entries.size, key = { entries[it].key }) { index ->
-            val item = entries[index]
-            if (item.block < 0) {
+        items(chapter.blocks.size + 1) { index ->
+            val blockIndex = index - 1
+            if (blockIndex < 0) {
                 // Chapter openings get air above and a short rule, so a new chapter reads as a
                 // break in the text rather than as one more paragraph.
                 Column(Modifier.padding(top = 26.dp, bottom = 10.dp)) {
@@ -321,28 +338,26 @@ private fun ScrollingChapter(state: ReaderContentState, onPosition: (Long, Reade
                             .background(MaterialTheme.colorScheme.onBackground.copy(alpha = .22f)),
                     )
                     Text(
-                        item.chapter.title,
+                        chapter.title,
                         style = MaterialTheme.typography.headlineSmall,
                         color = MaterialTheme.colorScheme.onBackground,
                         modifier = Modifier.padding(top = MoyueSpacing.Section),
                     )
                 }
             } else {
-                val block = item.chapter.blocks[item.block]
+                val block = chapter.blocks[blockIndex]
                 if (block is ContentBlock.Image) ReaderImage(block)
                 else {
                     val text = com.moyue.reader.feature.annotations.blockText(block)
-                    AnnotatedReaderText(text, item.chapter, listOf(com.moyue.reader.feature.annotations.TextSegment(0, text.length, item.block, 0)), state.preferences,
-                        highlights[item.chapter.id].orEmpty(), Modifier.fillMaxWidth(), indent = state.preferences.indentParagraphs && block is ContentBlock.Text,
+                    AnnotatedReaderText(text, chapter, listOf(com.moyue.reader.feature.annotations.TextSegment(0, text.length, blockIndex, 0)), state.preferences,
+                        highlights, Modifier.fillMaxWidth(), indent = state.preferences.indentParagraphs && block is ContentBlock.Text,
                         onTap = { onToggleControls() },
-                        onLayout = { layouts[item.key] = it }, onSelection = onSelection)
+                        onLayout = { layouts[blockIndex] = it }, onSelecting = { selecting = it }, onSelection = onSelection)
                 }
             }
         }
-        item {
-            if (state.prefetching) CircularProgressIndicator(Modifier.padding(16.dp))
-            else if (state.error != null) TextButton(onClick = onPrefetch) { Text("加载下一章失败，点击重试") }
-            else if (!state.preferences.autoNextChapter && state.canGoNext) TextButton(onClick = onNext) { Text("下一章") }
+        if (state.canGoNext) item {
+            TextButton(onClick = onNext) { Text("下一章") }
         }
     }
 }
@@ -415,10 +430,13 @@ private fun PagedChapter(state: ReaderContentState, cache: ReaderPageCache, onPo
         }.coerceAtLeast(0) }
         key(pages) {
             val pager = rememberPagerState(initialPage = initial, pageCount = { pages.size + if (state.canGoNext) 1 else 0 })
+            val latestNext by rememberUpdatedState(onNext)
+            val latestPosition by rememberUpdatedState(onPosition)
+            val autoNext by rememberUpdatedState(state.preferences.autoNextChapter)
             LaunchedEffect(pager, pages) {
                 snapshotFlow { pager.settledPage }.collect { index ->
-                    if (index < pages.size) onPosition(pages[index].start, (index + 1f) / pages.size)
-                    else if (state.preferences.autoNextChapter) onNext()
+                    if (index < pages.size) latestPosition(pages[index].start, (index + 1f) / pages.size)
+                    else if (autoNext) latestNext()
                 }
             }
             var turnJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
@@ -518,6 +536,7 @@ private fun ReaderControls(
             state.error?.let { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(horizontal = 20.dp)) }
             LinearProgressIndicator(
                 progress = { state.chapterProgress },
+                gapSize = 0.dp, drawStopIndicator = {},
                 trackColor = MaterialTheme.colorScheme.outlineVariant,
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp).height(3.dp),
             )
@@ -550,9 +569,10 @@ private fun ReaderControls(
                 Modifier.fillMaxWidth().padding(bottom = 10.dp),
                 horizontalArrangement = Arrangement.Center,
             ) {
-                ReaderMenuButton("目录", onChapters) { Icon(Icons.Default.Menu, null) }
-                Box(Modifier.width(MoyueSpacing.Section))
-                ReaderMenuButton("阅读设置", onSettings) { Icon(Icons.Default.Settings, null) }
+                PaperTool("目录", PaperIcons.Menu, onChapters)
+                Text("本章进度 ${(state.chapterProgress * 100).toInt()}%", Modifier.weight(1f).padding(horizontal = 8.dp, vertical = 18.dp), style = MaterialTheme.typography.labelSmall,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                PaperTool("阅读设置", PaperIcons.Settings, onSettings)
             }
         }
     }

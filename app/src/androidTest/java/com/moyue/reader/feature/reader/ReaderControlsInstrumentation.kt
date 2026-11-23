@@ -87,7 +87,7 @@ class ReaderControlsInstrumentation : Instrumentation() {
                         androidx.compose.runtime.key(book.id, index, pageMode) {
                         ReaderScreen(current, onBack = {}, onToggleControls = { reader.value = reader.value.copy(controlsVisible = !reader.value.controlsVisible) },
                             onPrevious = {}, onNext = {}, onChapter = {}, onPosition = { position, progress -> pageProgress.set(progress); progressHistory.add(progress); reader.value = reader.value.copy(position = position, chapterProgress = progress) }, onPreferences = { reader.value = reader.value.copy(preferences = it) },
-                            onScrollPosition = { _, _, _ -> }, onPrefetch = {}, annotations = annotations + emptyList(),
+                            onScrollPosition = { _, _, _ -> }, annotations = annotations + emptyList(),
                             onSelection = { _, _, _, _ -> check(current.bookId == book.id) })
                         }
                     } } }

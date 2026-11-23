@@ -24,6 +24,7 @@ import java.nio.charset.Charset
 interface ReaderDataSource {
     suspend fun book(bookId: Long): BookEntity?
     suspend fun chapters(bookId: Long): List<ChapterEntity>
+    suspend fun chapterMetadata(chapterId: Long): ChapterEntity? = null
     suspend fun load(book: BookEntity, chapter: ChapterEntity): ReaderChapter
     suspend fun progress(bookId: Long): ReadingProgressEntity?
     suspend fun saveProgress(progress: ReadingProgressEntity)
@@ -62,7 +63,7 @@ class ReaderRepository(private val source: ReaderDataSource) {
         currentBook = book
         chapterList = chapters
         warm(index)
-        return ReaderSession(book, chapters, requireNotNull(cache[index]), progress,source.catalogMessage(bookId))
+        return ReaderSession(book, chapterList, requireNotNull(cache[index]), progress,source.catalogMessage(bookId))
     }
 
     suspend fun chapter(index: Int): ReaderChapter {
@@ -98,7 +99,15 @@ class ReaderRepository(private val source: ReaderDataSource) {
     private suspend fun warm(index: Int) {
         val book = requireNotNull(currentBook)
         val keep = setOf(index - 1, index, index + 1).filter { it in chapterList.indices }.toSet()
-        if (index !in cache) cache[index] = source.load(book, chapterList[index])
+        val row = chapterList[index]
+        if (index !in cache) cache[index] = source.load(book, row)
+        // A web chapter can discover a next link while it loads, beyond the stored catalog.
+        if (book.sourceType == SourceType.WEB && index == chapterList.lastIndex) {
+            val loaded = source.chapterMetadata(row.id)
+            if (loaded != null && loaded != row && loaded.chapterIndex == row.chapterIndex) {
+                chapterList = chapterList.toMutableList().apply { this[index] = loaded }
+            }
+        }
         cache.keys.retainAll(keep)
     }
 
@@ -125,6 +134,7 @@ class RoomReaderDataSource(
 ) : ReaderDataSource {
     private val epubPackages = com.moyue.reader.parser.epub.EpubPackageCache()
     override suspend fun book(bookId: Long) = database.bookDao().get(bookId)
+    override suspend fun chapterMetadata(chapterId: Long) = database.chapterDao().get(chapterId)
     override suspend fun refreshCatalog(bookId:Long):List<ChapterEntity> = withContext(Dispatchers.IO) {
         val book=requireNotNull(database.bookDao().get(bookId))
         val rows=database.chapterDao().forBook(bookId)

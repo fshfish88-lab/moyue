@@ -106,7 +106,7 @@ class ReaderExperienceInstrumentation : Instrumentation() {
             // Touch coordinates must be sampled after the sheet's opening animation settles.
             SystemClock.sleep(500)
             if (android.os.Build.VERSION.SDK_INT >= 33) uiAutomation.clearCache()
-            val slider = nodes().first { it.rangeInfo != null }
+            val slider = nodes().first { it.rangeInfo?.let { range -> range.min == 14f && range.max == 32f } == true }
             val bounds = android.graphics.Rect().also(slider::getBoundsInScreen)
             result.put("sliderBounds", bounds.toShortString())
             val before = changes

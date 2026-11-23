@@ -3,7 +3,16 @@ package com.moyue.reader.feature.reader
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.*
+import com.moyue.reader.core.ui.PaperChip
+import com.moyue.reader.core.ui.PaperIcons
+import com.moyue.reader.core.ui.PaperCard
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.ui.Alignment
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -22,7 +31,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
-import androidx.compose.material3.Slider
+import com.moyue.reader.core.ui.PaperSlider as Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -31,8 +40,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
@@ -50,162 +60,81 @@ import com.moyue.reader.core.ui.palette
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ReaderSettingsSheet(
-    preferences: ReaderPreferences,
-    onChange: (ReaderPreferences) -> Unit,
-    onDismiss: () -> Unit,
-    showBookNavigation: Boolean = true,
-) {
-    var advanced by remember { mutableStateOf(false) }
+fun ReaderSettingsSheet(preferences: ReaderPreferences, onChange: (ReaderPreferences) -> Unit,
+    onDismiss: () -> Unit, showBookNavigation: Boolean = true) {
+    var tab by remember { mutableStateOf(0) }
     var fontDraft by remember { mutableStateOf<Float?>(null) }
     var brightnessDraft by remember { mutableStateOf<Float?>(null) }
     val preview = preferences.copy(fontSizeSp = fontDraft ?: preferences.fontSizeSp)
     val face = rememberReaderTypeface(preferences.fontFamily)
-    fun commitDrafts() {
+    fun commit() {
         if (fontDraft != null || brightnessDraft != null) {
-            onChange(preferences.copy(fontSizeSp = fontDraft ?: preferences.fontSizeSp,
-                brightness = brightnessDraft ?: preferences.brightness))
-            fontDraft = null
-            brightnessDraft = null
+            onChange(preferences.copy(fontSizeSp = fontDraft ?: preferences.fontSizeSp, brightness = brightnessDraft ?: preferences.brightness))
+            fontDraft = null; brightnessDraft = null
         }
     }
-    ModalBottomSheet(
-        sheetState = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        onDismissRequest = { commitDrafts(); onDismiss() },
-        containerColor = MaterialTheme.colorScheme.background,
-        tonalElevation = 0.dp,
-    ) {
-        LazyColumn(
-            Modifier.padding(horizontal = 20.dp),
-            verticalArrangement = Arrangement.spacedBy(MoyueSpacing.Section),
-        ) {
-            item { Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Text("阅读设置", style = MaterialTheme.typography.titleLarge)
-                TextButton(onClick = { commitDrafts(); advanced = !advanced }) { Text(if (advanced) "常用设置" else "更多设置") }
+    ModalBottomSheet(onDismissRequest = { commit(); onDismiss() }, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        containerColor = MaterialTheme.colorScheme.background, tonalElevation = 0.dp) {
+        LazyColumn(Modifier.fillMaxWidth().padding(horizontal = 24.dp), verticalArrangement = Arrangement.spacedBy(16.dp), contentPadding = PaddingValues(bottom = 28.dp)) {
+            item { Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text("阅读设置", Modifier.weight(1f), style = MaterialTheme.typography.titleLarge)
+                IconButton({ commit(); onDismiss() }) { Icon(PaperIcons.Close, "关闭阅读设置") }
             } }
-            if (!advanced) {
-            item {
-
-            // Theme swatches. The old row of five FilterChips said "米黄" / "淡绿" in words; showing
-            // the actual paper colour is both faster to read and the point of a reading theme.
-            SettingBlock("主题") {
-                Row(horizontalArrangement = Arrangement.spacedBy(MoyueSpacing.Tight)) {
-                    ReaderTheme.entries.forEach { theme ->
-                        ThemeSwatch(
-                            theme = theme,
-                            selected = preferences.theme == theme && !preferences.customColors,
-                            onClick = { onChange(preferences.copy(theme = theme, customColors = false)) },
-                        )
+            item { Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf("主题", "字体", "排版", "更多").forEachIndexed { index, label -> PaperChip(tab == index, { commit(); tab = index }, { Text(label) }) }
+            } }
+            if (tab == 0) {
+                item { Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    listOf(ReaderTheme.DAY, ReaderTheme.NIGHT, ReaderTheme.GREEN, ReaderTheme.SEPIA, ReaderTheme.GRAY).forEach { theme ->
+                        ThemeSwatch(theme, preferences.theme == theme && !preferences.customColors) { onChange(preferences.copy(theme = theme, customColors = false)) }
                     }
-                }
+                } }
+                item { SettingBlock("亮度") {
+                    Slider(brightnessDraft ?: preferences.brightness.takeIf { it >= 0f } ?: .5f,
+                        { brightnessDraft = it }, onValueChangeFinished = { commit() }, valueRange = .05f..1f)
+                    TextButton({ onChange(preferences.copy(brightness = if (preferences.brightness < 0f) .5f else -1f)) }) { Text(if (preferences.brightness < 0f) "亮度跟随系统" else "改为跟随系统") }
+                } }
+                item { SettingBlock("字号  ${preview.fontSizeSp.toInt()}sp") {
+                    Slider(preview.fontSizeSp, { fontDraft = it.roundToInt().toFloat() }, onValueChangeFinished = { commit() }, valueRange = 14f..32f)
+                } }
+                if (showBookNavigation) item { SettingBlock("阅读方式") {
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        PageMode.entries.forEach { mode -> PaperChip(preferences.pageMode == mode,
+                            { onChange(preferences.copy(pageMode = mode)) }, { Text(if (mode == PageMode.SCROLL) "上下滚动" else "左右分页") }, Modifier.weight(1f)) }
+                    }
+                } }
+                item { TextButton({ tab = 2 }) { Text("字体、边距与更多排版设置") } }
             }
-
-            // Live preview: the sample text renders at the size, line height and font being chosen.
-            }
-            item { SettingBlock("字号  ${preview.fontSizeSp.toInt()}sp") {
-                Box(
-                    Modifier
-                        .fillMaxWidth()
-                        .clip(androidx.compose.foundation.shape.RoundedCornerShape(12.dp))
-                        .background(readerPreviewBackground(preferences))
-                        .padding(horizontal = MoyueSpacing.Item, vertical = MoyueSpacing.Item),
-                ) {
-                    Text(
-                        "夜色渐渐笼罩城市，远处的灯光一点一点亮起。",
-                        fontSize = preview.fontSizeSp.sp,
+            if (tab in 1..2) item {
+                Box(Modifier.fillMaxWidth().clip(androidx.compose.foundation.shape.RoundedCornerShape(16.dp))
+                    .background(readerPreviewBackground(preferences)).padding(20.dp)) {
+                    Text("山风翻过一页书，心也慢慢安静下来。", fontSize = preview.fontSizeSp.sp,
                         lineHeight = (preview.fontSizeSp * preferences.previewLineFactor).sp,
-                        fontFamily = face?.let { FontFamily(it) } ?: FontFamily.Default,
-                        color = readerPreviewInk(preferences),
-                    )
-                }
-                Slider(
-                    value = preview.fontSizeSp,
-                    // Continuous range, snapped to whole sp in the callback. A discrete step grid was
-                    // the wrong tool here: no step count divides 14..32 evenly, so neighbouring stops
-                    // rounded to the same integer and the "18sp" label could stall while the thumb
-                    // kept moving. Rounding the value itself keeps label and rendered text in step.
-                    onValueChange = { fontDraft = it.roundToInt().toFloat() },
-                    onValueChangeFinished = { commitDrafts() },
-                    valueRange = 14f..32f,
-                )
-            }
-
-            }
-            item { SettingBlock("字体") {
-                SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
-                    ReaderFont.entries.forEachIndexed { index, font ->
-                        SegmentedButton(
-                            selected = preferences.fontFamily == font,
-                            onClick = { onChange(preferences.copy(fontFamily = font)) },
-                            shape = SegmentedButtonDefaults.itemShape(index, ReaderFont.entries.size),
-                            label = { Text(font.label, fontSize = 13.sp) },
-                        )
-                    }
+                        fontFamily = face?.let { FontFamily(it) } ?: FontFamily.Default, color = readerPreviewInk(preferences))
                 }
             }
-
+            if (tab == 1) {
+                item { SettingBlock("字体") { Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    ReaderFont.entries.forEach { font -> PaperChip(preferences.fontFamily == font, { onChange(preferences.copy(fontFamily = font)) }, { Text(font.label) }) }
+                } } }
+                item { SettingBlock("字号  ${preview.fontSizeSp.toInt()}sp") {
+                    Slider(preview.fontSizeSp, { fontDraft = it.roundToInt().toFloat() }, onValueChangeFinished = { commit() }, valueRange = 14f..32f)
+                } }
             }
-            } else {
-            item { SpacingRow("行距", preferences.lineSpacing) { onChange(preferences.copy(lineSpacing = it)) }
+            if (tab == 2) {
+                item { SpacingRow("行距", preferences.lineSpacing) { onChange(preferences.copy(lineSpacing = it)) } }
+                item { SpacingRow("段距", preferences.paragraphSpacing) { onChange(preferences.copy(paragraphSpacing = it)) } }
+                item { SpacingRow("边距", preferences.margin) { onChange(preferences.copy(margin = it)) } }
+                item { ToggleSetting("段落首行空两格", preferences.indentParagraphs) { onChange(preferences.copy(indentParagraphs = it)) } }
+                item { CustomColors(preferences, onChange) }
             }
-            item { SpacingRow("段距", preferences.paragraphSpacing) { onChange(preferences.copy(paragraphSpacing = it)) }
+            if (tab == 3) {
+                if (showBookNavigation) item { ToggleSetting("章末继续翻动进入下一章", preferences.autoNextChapter) { onChange(preferences.copy(autoNextChapter = it)) } }
+                item { ToggleSetting("阅读时屏幕常亮", preferences.keepScreenOn) { onChange(preferences.copy(keepScreenOn = it)) } }
+                item { ToggleSetting("亮度跟随系统", preferences.brightness < 0f) { onChange(preferences.copy(brightness = if (it) -1f else .5f)) } }
+                item { CustomColors(preferences, onChange) }
+                item { TextButton({ onChange(ReaderPreferences()) }) { Text("恢复默认") } }
             }
-            item { SpacingRow("边距", preferences.margin) { onChange(preferences.copy(margin = it)) }
-
-            }
-            item { if (showBookNavigation) SettingBlock("翻页方式") {
-                SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
-                    PageMode.entries.forEachIndexed { index, mode ->
-                        SegmentedButton(
-                            selected = preferences.pageMode == mode,
-                            onClick = { onChange(preferences.copy(pageMode = mode)) },
-                            shape = SegmentedButtonDefaults.itemShape(index, PageMode.entries.size),
-                            label = { Text(if (mode == PageMode.SCROLL) "上下滚动" else "左右分页") },
-                        )
-                    }
-                }
-            }
-
-            }
-            item { HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-
-            }
-            item { ToggleSetting("段落首行空两格", preferences.indentParagraphs) { onChange(preferences.copy(indentParagraphs = it)) }
-            }
-            item { if (showBookNavigation) ToggleSetting("章末继续翻动进入下一章", preferences.autoNextChapter) { onChange(preferences.copy(autoNextChapter = it)) }
-            }
-            item { ToggleSetting("阅读时屏幕常亮", preferences.keepScreenOn) { onChange(preferences.copy(keepScreenOn = it)) }
-            }
-            item { ToggleSetting("亮度跟随系统", preferences.brightness < 0f) {
-                onChange(preferences.copy(brightness = if (it) -1f else .5f))
-            }
-            if (preferences.brightness >= 0f) {
-                SettingBlock("阅读亮度") {
-                    Slider(
-                        value = brightnessDraft ?: preferences.brightness,
-                        onValueChange = { brightnessDraft = it },
-                        onValueChangeFinished = { commitDrafts() },
-                        valueRange = .05f..1f,
-                    )
-                }
-            }
-
-            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-
-            }
-            item { CustomColors(preferences, onChange) }
-            }
-
-            item { Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                TextButton(onClick = { onChange(ReaderPreferences()) }) { Text("恢复默认") }
-                Text(
-                    "滑块松手后保存",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            }
-            item { Box(Modifier.height(20.dp)) }
         }
     }
 }
@@ -217,6 +146,7 @@ private fun ThemeSwatch(theme: ReaderTheme, selected: Boolean, onClick: () -> Un
         Box(
             Modifier
                 .size(48.dp)
+                .semantics { contentDescription = "主题 · ${theme.label}" }
                 .clip(CircleShape)
                 .background(palette.background)
                 .border(
@@ -281,8 +211,8 @@ private val SpacingLevel.label: String get() = when (this) {
 
 private val ReaderTheme.label: String get() = when (this) {
     ReaderTheme.DAY -> "日间"
-    ReaderTheme.SEPIA -> "米黄"
-    ReaderTheme.GREEN -> "淡绿"
+    ReaderTheme.SEPIA -> "纸色"
+    ReaderTheme.GREEN -> "护眼"
     ReaderTheme.GRAY -> "灰色"
     ReaderTheme.NIGHT -> "夜间"
 }
@@ -298,7 +228,7 @@ private val ReaderFont.label: String get() = when (this) {
 private fun ToggleSetting(label: String, checked: Boolean, onChange: (Boolean) -> Unit) {
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
         Text(label, modifier = Modifier.weight(1f))
-        Switch(checked = checked, onCheckedChange = onChange)
+        Switch(checked = checked, onCheckedChange = onChange, colors = androidx.compose.material3.SwitchDefaults.colors(checkedTrackColor = MaterialTheme.colorScheme.secondary))
     }
 }
 

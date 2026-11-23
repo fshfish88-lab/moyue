@@ -1,5 +1,7 @@
 package com.moyue.reader.feature.markdown
 
+import androidx.compose.foundation.horizontalScroll
+
 import android.annotation.SuppressLint
 import android.content.ClipData
 import android.content.ClipboardManager
@@ -21,6 +23,9 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import com.moyue.reader.core.ui.PaperIcons
+import com.moyue.reader.core.ui.PaperTool
+import com.moyue.reader.core.ui.PaperChip
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
@@ -77,6 +82,7 @@ fun MarkdownScreen(
     var fatal by remember(bookId) { mutableStateOf<String?>(null) }
     var status by remember(bookId) { mutableStateOf("正在打开…") }
     var editing by remember(bookId) { mutableStateOf(false) }
+    var sourceEditing by remember(bookId) { mutableStateOf(false) }
     var loaded by remember(bookId) { mutableStateOf(false) }
     var web by remember(bookId) { mutableStateOf<WebView?>(null) }
     var menu by remember { mutableStateOf(false) }
@@ -164,7 +170,7 @@ fun MarkdownScreen(
             }
             "dismissSearch" -> closeSearch()
             "opened" -> { loaded = true; status = "已保存" }
-            "mode" -> editing = data.optBoolean("editing")
+            "mode" -> { editing = data.optBoolean("editing"); sourceEditing = data.optString("mode") == "sv" }
             "outline" -> outline = data.optJSONArray("items") ?: JSONArray()
             "changed" -> {
                 latestRevision = data.getLong("revision"); latestText = data.getString("text"); status = "正在保存…"
@@ -239,7 +245,7 @@ fun MarkdownScreen(
     LaunchedEffect(preferences, loaded, fontScale) {
         if (loaded) js("theme", JSONObject().put("paper", "#$bg").put("ink", "#$ink")
             .put("size", "${preferences.fontSizeSp * fontScale}px").put("line", when (preferences.lineSpacing) { SpacingLevel.COMPACT -> "1.45"; SpacingLevel.STANDARD -> "1.7"; SpacingLevel.WIDE -> "2.0" })
-            .put("margin", when (preferences.margin) { SpacingLevel.COMPACT -> "12px"; SpacingLevel.STANDARD -> "20px"; SpacingLevel.WIDE -> "28px" })
+            .put("margin", when (preferences.margin) { SpacingLevel.COMPACT -> "12px"; SpacingLevel.STANDARD -> "24px"; SpacingLevel.WIDE -> "28px" })
             .put("paragraph", when (preferences.paragraphSpacing) { SpacingLevel.COMPACT -> "12px"; SpacingLevel.STANDARD -> "20px"; SpacingLevel.WIDE -> "28px" })
             .put("indent", if (preferences.indentParagraphs) "2em" else "0")
             .put("reduceMotion", android.provider.Settings.Global.getFloat(context.contentResolver, android.provider.Settings.Global.ANIMATOR_DURATION_SCALE, 1f) == 0f)
@@ -251,7 +257,7 @@ fun MarkdownScreen(
             topBar = {
                 Column {
                     TopAppBar(title = { Column { Text(title.ifEmpty { "Markdown" }, maxLines = 1); Text(status, style = MaterialTheme.typography.labelSmall, modifier = Modifier.clickable { if (editing) js("save", JSONObject.quote("")) }) } },
-                        navigationIcon = { IconButton(onClick = { back() }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回") } },
+                        navigationIcon = { IconButton(onClick = { back() }) { Icon(PaperIcons.Back, "返回") } },
                         actions = {
                             TextButton(enabled = loaded, onClick = {
                                 closePanels()
@@ -260,7 +266,7 @@ fun MarkdownScreen(
                                 else confirmEditing = true
                             }) { Text(if (editing) "阅读" else "编辑") }
                             Box {
-                                IconButton(onClick = { val show=!menu; closePanels(); menu=show }) { Icon(Icons.Default.MoreVert, "更多") }
+                                IconButton(onClick = { val show=!menu; closePanels(); menu=show }) { Icon(PaperIcons.More, "更多") }
                                 DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                                     DropdownMenuItem(text = { Text("本书标注") }, onClick = { menu = false; showAnnotations = true })
                                     DropdownMenuItem(text = { Text("添加当前位置书签") }, enabled = loaded && !editing, onClick = { menu = false; js("bookmark") })
@@ -273,6 +279,11 @@ fun MarkdownScreen(
                                 }
                             }
                         })
+                    Row(Modifier.fillMaxWidth().padding(horizontal = 24.dp).horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        PaperChip(!editing, { if (editing) request("read") }, { Text("阅读") }, enabled = loaded)
+                        PaperChip(editing && !sourceEditing, { if (editing) js("edit") else if (MarkdownText.canEdit(latestText)) confirmEditing = true else notify("此文档暂以只读方式打开") }, { Text("即时编辑") }, enabled = loaded)
+                        PaperChip(editing && sourceEditing, { if (MarkdownText.canEdit(latestText)) {closePanels();js("source")} else notify("此文档暂以只读方式打开") }, { Text("源码") }, enabled = loaded)
+                    }
                     AnimatedVisibility(showSearch, enter = MoyueMotion.expand(), exit = MoyueMotion.collapse()) {
                       Column {
                       Row(Modifier.padding(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -287,9 +298,10 @@ fun MarkdownScreen(
             },
             bottomBar = {
                 AnimatedVisibility(!editing, enter = MoyueMotion.expand(), exit = MoyueMotion.collapse()) { Row(Modifier.fillMaxWidth().navigationBarsPadding(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                    TextButton(onClick = { closePanels(); showOutline = true }) { Text("大纲") }
-                    TextButton(onClick = { closePanels(); showAppearance = true }) { Text("外观") }
-                    TextButton(onClick = { toggleSearch() }) { Text("查找") }
+                    PaperTool("大纲", PaperIcons.Menu, { closePanels(); showOutline = true })
+                    PaperTool("查找", PaperIcons.Search, { toggleSearch() })
+                    PaperTool("标注", PaperIcons.Bookmark, { closePanels(); showAnnotations = true })
+                    PaperTool("外观", PaperIcons.Settings, { closePanels(); showAppearance = true })
                 }
             } }, snackbarHost = { SnackbarHost(snackbar) },
         ) { padding ->

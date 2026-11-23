@@ -85,7 +85,7 @@
         if(button)button.click();
       }
       if(mode==='sv')editor.setPreviewMode('both');
-      updateEditorLayout();editor.focus();send('mode',{editing:true});return;
+      updateEditorLayout();editor.focus();send('mode',{editing:true,mode:editor.getCurrentMode()});return;
     }
     initializing=true;reading.hidden=true;editing.hidden=false;editingMode=true;motion(editing);
     // Lute's rich modes normalize escaped TeX delimiters. Keep these documents in
@@ -113,9 +113,10 @@
         // switch for that handler. Stop only that source scroll at the integration boundary.
         // Both panes still scroll normally; the upstream distribution is kept byte-identical.
         area.addEventListener('scroll',e=>{if(e.target.matches?.('.vditor-sv'))e.stopPropagation();},true);
-        new MutationObserver(updateEditorLayout).observe(area,{attributes:true,subtree:true,attributeFilter:['style']});
+        let reportedMode=editor.getCurrentMode();
+        new MutationObserver(()=>{updateEditorLayout();const mode=editor.getCurrentMode();if(mode!==reportedMode){reportedMode=mode;send('mode',{editing:editingMode,mode});}}).observe(area,{attributes:true,subtree:true,attributeFilter:['style']});
         updateEditorLayout();
-        editor.focus();send('mode',{editing:true});
+        editor.focus();send('mode',{editing:true,mode:editor.getCurrentMode()});
       }
     });
   }

@@ -22,6 +22,9 @@ import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
+import com.moyue.reader.core.ui.PaperIcons
+import com.moyue.reader.core.ui.PaperTool
+import com.moyue.reader.core.ui.PaperChip
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.asImageBitmap
@@ -202,10 +205,13 @@ private fun LoadedVisual(doc:VisualDocument,container:MoyueContainer,preferences
             }
         }
         AnimatedVisibility(controls,enter=MoyueMotion.enter(-1),exit=MoyueMotion.exit(-1),modifier=Modifier.align(Alignment.TopCenter)) {
-            TopAppBar(title={Text(doc.book.title,maxLines=1,overflow=TextOverflow.Ellipsis)},navigationIcon={IconButton({back()}){Icon(Icons.AutoMirrored.Filled.ArrowBack,"返回书架")}},
-                actions={IconButton({toggle(Panel.MENU)}){Icon(Icons.Default.MoreVert,"图片漫画菜单")}
+            TopAppBar(title={Text(doc.book.title,maxLines=1,overflow=TextOverflow.Ellipsis)},navigationIcon={IconButton({back()}){Icon(PaperIcons.Back,"返回书架")}},
+                actions={IconButton({toggle(Panel.MENU)}){Icon(PaperIcons.More,"图片漫画菜单")}
                     DropdownMenu(panel==Panel.MENU,{panel=null}) {
                         DropdownMenuItem(text={Text("添加当前位置书签")},onClick={panel=null;annotationDraft=com.moyue.reader.feature.annotations.AnnotationDraft(doc.book.id,JSONObject().put("kind","VISUAL").put("position",JSONObject(VisualRepository.encode(position)).put("sourceHash",doc.hash)).toString(),"","第 ${page+1} 页",doc.hash,"BOOKMARK")})
+                        DropdownMenuItem(text={Text("旋转90°")},onClick={panel=null;scope.launch {activeZoom?.zoomable?.rotateBy(90)}})
+                        DropdownMenuItem(text={Text("缩小")},onClick={panel=null;scope.launch {activeZoom?.zoomable?.scaleBy(.8f,animated=true)}})
+                        DropdownMenuItem(text={Text("放大")},onClick={panel=null;scope.launch {activeZoom?.zoomable?.scaleBy(1.25f,animated=true)}})
                         DropdownMenuItem(text={Text("本书标注")},onClick={panel=null;showAnnotations=true})
                         DropdownMenuItem(text={Text("阅读外观")},onClick={panel=Panel.APPEARANCE})
                         DropdownMenuItem(text={Text("重置缩放与旋转")},onClick={panel=null;position=position.copy(scale=1f,rotation=0,centerX=.5f,centerY=.5f);zoomGeneration++})
@@ -220,12 +226,10 @@ private fun LoadedVisual(doc:VisualDocument,container:MoyueContainer,preferences
                     TextButton({jump(page+1)},enabled=page<doc.pages.lastIndex){Text("下一页")}
                 } else Text("${doc.pages[0].width} × ${doc.pages[0].height}",style=MaterialTheme.typography.labelSmall,modifier=Modifier.align(Alignment.CenterHorizontally).padding(6.dp))
                 Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),horizontalArrangement=Arrangement.Center) {
-                    if(doc.comic) TextButton({toggle(Panel.THUMBNAILS)}){Text("缩略图")}
-                    TextButton({showAnnotations=true}){Text("标注")}
-                    TextButton({toggle(Panel.APPEARANCE)}){Text("外观")}
-                    TextButton({scope.launch {activeZoom?.zoomable?.rotateBy(90)}}){Text("旋转")}
-                    TextButton({scope.launch {activeZoom?.zoomable?.scaleBy(.8f,animated=true)}}){Text("−")}
-                    TextButton({scope.launch {activeZoom?.zoomable?.scaleBy(1.25f,animated=true)}}){Text("＋")}
+                    if(doc.comic) PaperTool("缩略图", PaperIcons.Grid, {toggle(Panel.THUMBNAILS)})
+                    PaperTool("标注", PaperIcons.Bookmark, {showAnnotations=true})
+                    PaperTool("外观", PaperIcons.Settings, {toggle(Panel.APPEARANCE)})
+                    PaperTool("更多", PaperIcons.More, {toggle(Panel.MENU)})
                 }
             }
         }

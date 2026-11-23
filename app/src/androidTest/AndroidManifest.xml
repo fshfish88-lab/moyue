@@ -21,4 +21,6 @@
     <instrumentation android:name="com.moyue.reader.feature.annotations.SearchScopeInstrumentation" android:targetPackage="com.moyue.reader" />
     <instrumentation android:name="com.moyue.reader.feature.importbook.ShareImportInstrumentation" android:targetPackage="com.moyue.reader" />
     <instrumentation android:name="com.moyue.reader.feature.bookshelf.V170Instrumentation" android:targetPackage="com.moyue.reader" />
+    <instrumentation android:name="com.moyue.reader.feature.bookshelf.PaperShelfInstrumentation" android:targetPackage="com.moyue.reader" />
+    <instrumentation android:name="com.moyue.reader.feature.bookshelf.PaperAppInstrumentation" android:targetPackage="com.moyue.reader" />
 </manifest>

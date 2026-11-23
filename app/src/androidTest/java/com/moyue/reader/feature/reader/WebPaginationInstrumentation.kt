@@ -94,6 +94,7 @@ class WebPaginationInstrumentation : Instrumentation() {
                     val repository = ReaderRepository(RoomReaderDataSource(c.database, c.storage, webFetcher=loneFetcher))
                     val opened = repository.open(loneId)
                     verify(opened.chapter.blocks.filterIsInstance<ContentBlock.Text>().any { "第3部分" in it.text }, "threePartsInReader")
+                    verify(opened.chapters.single().nextUrl == "https://fixture.test/lone/2.html", "nextLinkAvailableToReaderControls")
                     val next = requireNotNull(repository.next(0))
                     verify(next.title == "第2章 独立测试" && next.blocks.filterIsInstance<ContentBlock.Text>().any { "第3部分" in it.text }, "nextChapterUsesFinalPageLink")
             }

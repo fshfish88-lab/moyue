@@ -29,6 +29,9 @@ import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
+import com.moyue.reader.core.ui.PaperIcons
+import com.moyue.reader.core.ui.PaperTool
+import com.moyue.reader.core.ui.PaperChip
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.luminance
@@ -247,10 +250,12 @@ fun PdfScreen(bookId: Long, container: MoyueContainer, preferences: ReaderPrefer
             }
             AnimatedVisibility(controls,enter=MoyueMotion.enter(-1),exit=MoyueMotion.exit(-1),modifier=Modifier.align(Alignment.TopCenter)) {
               Column(Modifier.fillMaxWidth()) {
-              TopAppBar(modifier=Modifier.onSizeChanged {topChrome=it.height/density},title={Text(document?.book?.title ?: "PDF",maxLines=1)},navigationIcon={IconButton({back()}) { Icon(Icons.AutoMirrored.Filled.ArrowBack,"返回书架") }},actions={
-                IconButton({val show=!menu; closePanels(); menu=show}) { Icon(Icons.Default.MoreVert,"PDF 菜单") }
+              TopAppBar(modifier=Modifier.onSizeChanged {topChrome=it.height/density},title={Text(document?.book?.title ?: "PDF",maxLines=1,style=MaterialTheme.typography.titleMedium)},navigationIcon={IconButton({back()}) { Icon(PaperIcons.Back,"返回书架") }},actions={
+                IconButton({val show=!menu; closePanels(); menu=show}) { Icon(PaperIcons.More,"PDF 菜单") }
                 DropdownMenu(menu,{menu=false}) {
                     DropdownMenuItem(text={Text("添加当前位置书签")},enabled=opened,onClick={menu=false; annotationDraft = com.moyue.reader.feature.annotations.AnnotationDraft(bookId, JSONObject().put("kind","PDF").put("pageIndex",position.pageIndex).put("position",JSONObject(PdfRepository.encode(position))).toString(), "", "第 ${position.pageIndex + 1} 页", type="BOOKMARK")})
+                    DropdownMenuItem(text={Text("缩小")}, enabled=opened, onClick={menu=false;js("zoom","-1")})
+                    DropdownMenuItem(text={Text("放大")}, enabled=opened, onClick={menu=false;js("zoom","1")})
                     DropdownMenuItem(text={Text("本书标注")},onClick={menu=false; showAnnotations=true})
                     if(outlineCount>0) DropdownMenuItem(text={Text("文档大纲")},onClick={toggleSidebar(2)})
                     DropdownMenuItem(text={Text("阅读外观")},onClick={showAppearance()})
@@ -281,12 +286,11 @@ fun PdfScreen(bookId: Long, container: MoyueContainer, preferences: ReaderPrefer
                     TextButton({js("page",(page+1).toString())},enabled=opened && page<pages) { Text("下一页") }
                 }
                 Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),horizontalArrangement=Arrangement.Center) {
-                    TextButton({toggleSidebar(1)},enabled=opened) { Text("缩略图") }
-                    TextButton({toggleSearch()},enabled=opened) { Text("查找") }
-                    TextButton({showBookmarks()},enabled=opened) { Text("书签") }
-                    TextButton({showAppearance()}) { Text("外观") }
-                    TextButton({js("zoom","-1")},enabled=opened) { Text("−") }
-                    TextButton({js("zoom","1")},enabled=opened) { Text("＋") }
+                    PaperTool("缩略图", PaperIcons.Grid, { toggleSidebar(1) }, enabled = opened)
+                    PaperTool("查找", PaperIcons.Search, { toggleSearch() }, enabled = opened)
+                    PaperTool("书签", PaperIcons.Bookmark, { showBookmarks() }, enabled = opened)
+                    PaperTool("外观", PaperIcons.Settings, { showAppearance() }, enabled = true)
+
                 }
               }
             }

@@ -3,6 +3,8 @@ package com.moyue.reader.feature.reader
 import com.moyue.reader.core.database.ReadingProgressEntity
 import com.moyue.reader.core.model.ContentBlock
 import com.moyue.reader.core.model.ReaderPosition
+import com.moyue.reader.core.model.SourceType
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -79,17 +81,14 @@ class ReaderViewModelTest {
         assertEquals(ReaderPosition(1, 0), safeReaderPosition(blocks, 1, 999))
         assertEquals(ReaderPosition(0, 0), safeReaderPosition(blocks, 999, 999))
     }
-    @Test fun prefetchAppendsWithoutMovingVisibleChapter() = runBlocking {
-        val model = ReaderViewModel(ReaderRepository(FakeReaderDataSource(5)))
+    @Test fun adjacentPrefetchDoesNotChangeReadingPosition() = runBlocking {
+        val repository = ReaderRepository(FakeReaderDataSource(5))
+        val model = ReaderViewModel(repository)
         model.open(1)
-        model.prefetchFollowing()
-        repeat(10) { model.prefetchFollowing() }
-        assertEquals(listOf(0, 1), model.state.value!!.scrollWindow.map { it.index })
-        assertEquals(0, model.state.value!!.chapter.index)
-        assertEquals(0, model.state.value!!.scrollSession)
-        model.goTo(3)
-        assertEquals(listOf(3), model.state.value!!.scrollWindow.map { it.index })
-        assertEquals(1, model.state.value!!.scrollSession)
+        val initial = model.state.value
+        model.prefetchAdjacent()
+        assertEquals(setOf(0, 1), repository.cachedChapterIndexes())
+        assertSame(initial, model.state.value)
     }
 
     @Test fun nextChapterStartsAtBeginningAndSavesIt() = runBlocking {
@@ -100,6 +99,46 @@ class ReaderViewModelTest {
         assertEquals(ReaderPosition(0, 0), model.state.value!!.position)
         assertEquals(2L, source.storedProgress!!.chapterId)
         assertEquals(0, source.storedProgress!!.charOffset)
+    }
+
+    @Test fun lastCatalogEntryCanContinueViaLinkFoundInItsBody() = runBlocking {
+        val fake = FakeReaderDataSource(2)
+        val source = object : ReaderDataSource by fake {
+            override suspend fun book(bookId: Long) = fake.book(bookId).copy(sourceType = SourceType.WEB)
+            override suspend fun chapterMetadata(chapterId: Long) =
+                fake.chapters(1).single { it.id == chapterId }.copy(nextUrl = "https://example.com/chapter-3")
+        }
+        val model = ReaderViewModel(ReaderRepository(source))
+        model.open(1, 1)
+        assertTrue(model.state.value!!.canGoNext)
+        model.open(1, 0)
+        model.goTo(1)
+        assertTrue(model.state.value!!.canGoNext)
+    }
+
+    @Test fun aSecondNextRequestFromTheSameChapterCannotSkipAChapter() = runBlocking {
+        val fake = FakeReaderDataSource(5)
+        val loading = CompletableDeferred<Unit>()
+        val finishLoad = CompletableDeferred<Unit>()
+        val source = object : ReaderDataSource by fake {
+            override suspend fun load(book: com.moyue.reader.core.database.BookEntity, chapter: com.moyue.reader.core.database.ChapterEntity): com.moyue.reader.core.model.ReaderChapter {
+                if (chapter.chapterIndex == 1) {
+                    loading.complete(Unit)
+                    finishLoad.await()
+                }
+                return fake.load(book, chapter)
+            }
+        }
+        val model = ReaderViewModel(ReaderRepository(source))
+        model.open(1)
+        val first = launch { model.goNext() }
+        loading.await()
+        val second = launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) { model.goNext() }
+        finishLoad.complete(Unit)
+        first.join()
+        second.join()
+        assertEquals(1, model.state.value!!.chapter.index)
+        assertEquals(ReaderPosition(0, 0), model.state.value!!.position)
     }
 
     @Test
@@ -116,13 +155,19 @@ class ReaderViewModelTest {
         assertEquals(101, viewModel.state.value?.chapter?.index)
     }
 
-    @Test fun duplicateScrollPositionKeepsTheSameStateAndCrossChapterPublishesOnce() = runBlocking {
+    @Test fun scrollUpdatesCannotAdvanceToAnotherChapterOrOverwriteItsPosition() = runBlocking {
         val model = ReaderViewModel(ReaderRepository(FakeReaderDataSource(5)))
         model.open(1)
         val initial = model.state.value
         model.updateScrollPosition(1, ReaderPosition(0, 0), 0f)
         assertSame(initial, model.state.value)
-        model.prefetchFollowing()
+        model.prefetchAdjacent()
+        model.updateScrollPosition(2, ReaderPosition(1, 3), .3f)
+        assertSame(initial, model.state.value)
+        model.goNext()
+        val next = model.state.value
+        model.updateScrollPosition(1, ReaderPosition(1, 3), .9f)
+        assertSame(next, model.state.value)
         val emitted = mutableListOf<ReaderState>()
         val observer = launch(Dispatchers.Unconfined) { model.state.filterNotNull().collect { emitted += it } }
         emitted.clear()
